@@ -1,0 +1,103 @@
+[project]
+name = "flathub_submission_checker"
+version = "1.0.0"
+description = "Flathub submission checker"
+authors = [
+  {name = "bbhtt", email = "bbhtt@bbhtt.in"},
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = "<4.0,>=3.10"
+dependencies = [
+    "publicsuffixlist>=1.0.2.20250802,<2",
+    "PyGithub<3.0.0,>=2.6.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/flathub-infra/submission-checker"
+Repository = "https://github.com/flathub-infra/submission-checker.git"
+
+[dependency-groups]
+dev = [
+    "pre-commit<4.0.0,>=3.8.0",
+    "mypy<2.0.0,>=1.11.2",
+    "ruff<1.0.0,>=0.6.7",
+    "pytest<9.0.0,>=8.3.3",
+]
+
+[tool.mypy]
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_any_unimported = true
+disallow_incomplete_defs = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_untyped_defs = true
+extra_checks = true
+no_implicit_optional = true
+no_implicit_reexport = true
+show_error_codes = true
+strict = true
+strict_equality = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unused_configs = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = "tests"
+disable_error_code = ["no-untyped-def"]
+
+[tool.ruff]
+line-length = 88
+include = ["*.py"]
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+  "A",
+  "ARG",
+  "B",
+  "C4",
+  "DTZ",
+  "E",
+  "ERA",
+  "F",
+  "I",
+  "ICN",
+  "PIE",
+  "PL",
+  "Q",
+  "RET",
+  "RSE",
+  "RUF",
+  "S",
+  "SIM",
+  "T201",
+  "UP",
+  "W",
+]
+
+ignore = [
+  "PLR2004",
+  "PLR0911",
+  "PLR0912",
+  "PLR0913",
+  "PLR0915",
+  "S105",
+  "S607",
+  "S603",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests.py" = ["S101", "E501"]
+
+[tool.ruff.format]
+line-ending = "lf"
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests.py",
+]

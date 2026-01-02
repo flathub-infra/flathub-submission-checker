@@ -1,0 +1,158 @@
+name: CI
+
+on:
+  push:
+    branches: main
+    paths-ignore:
+      - '.gitignore'
+      - '.pre-commit-config.yaml'
+      - 'LICENSE'
+      - 'README.md'
+      - 'action.yml'
+  pull_request:
+    branches: main
+    paths-ignore:
+      - '.gitignore'
+      - '.pre-commit-config.yaml'
+      - 'LICENSE'
+      - 'README.md'
+      - 'action.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 1,5'
+
+env:
+  # Match with docker image
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  ci:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: ci-${{ matrix.platform }}-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+        # 4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        # 7.2.0
+        uses: astral-sh/setup-uv@61cb8a9741eeb8a550a1b8544337180c0fc8476b
+        with:
+          version: "0.9.21"
+          enable-cache: true
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          cache-dependency-glob: |
+            **/uv.lock
+            **/pyproject.toml
+
+      - name: Install python dependencies
+        run: uv sync --all-extras --all-groups --frozen --allow-python-downloads
+
+      - name: Check code formatting
+        run: uv run ruff format --check
+
+      - name: Lint
+        run: uv run ruff check --output-format=github
+
+      - name: Check python types
+        run: uv run mypy .
+
+      - name: Run tests
+        run: uv run pytest -vvv
+
+  docker:
+    needs: ci
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: amd64
+          - os: ubuntu-24.04-arm
+            platform: arm64
+    runs-on: ${{matrix.os}}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: ${{ matrix.platform }}-docker_build
+      cancel-in-progress: true
+    steps:
+        # 4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        # 3.10.0
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2
+
+      - name: Login to ghcr.io
+        # 3.4.0
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        # 6.15.0
+        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/${{ matrix.platform }}
+          push: ${{ github.event_name != 'pull_request' }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/submission-checker:${{ github.sha }}-${{ matrix.platform }}
+            ghcr.io/${{ github.repository_owner }}/submission-checker:latest-${{ matrix.platform }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=ssh://git@github.com:${{ github.repository }}.git
+            org.opencontainers.image.url=https://github.com/${{ github.repository }}
+
+  docker-manifest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: docker
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+    permissions:
+      packages: write
+    steps:
+      - name: Login to ghcr.io
+        # 3.4.0
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push manifest
+        run: |
+          docker manifest create \
+            ghcr.io/${{ github.repository_owner }}/submission-checker:${{ github.sha }} \
+            --amend ghcr.io/${{ github.repository_owner }}/submission-checker:${{ github.sha }}-amd64 \
+            --amend ghcr.io/${{ github.repository_owner }}/submission-checker:${{ github.sha }}-arm64
+
+          docker manifest push ghcr.io/${{ github.repository_owner }}/submission-checker:${{ github.sha }}
+
+          docker manifest create \
+            ghcr.io/${{ github.repository_owner }}/submission-checker:latest \
+            --amend ghcr.io/${{ github.repository_owner }}/submission-checker:${{ github.sha }}-amd64 \
+            --amend ghcr.io/${{ github.repository_owner }}/submission-checker:${{ github.sha }}-arm64
+
+          docker manifest push ghcr.io/${{ github.repository_owner }}/submission-checker:latest
