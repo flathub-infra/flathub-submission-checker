@@ -1,0 +1,109 @@
+[build-system]
+requires = ["setuptools>=61.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+exclude = ["**/__pycache__"]
+
+[project]
+name = "flathub_submission_checker"
+version = "0.0.0"
+description = "Flathub submission checker"
+authors = [
+  {name = "bbhtt", email = "bbhtt@bbhtt.in"},
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = "<4,>=3.12"
+dependencies = [
+  "publicsuffixlist>=1.0.2.20250802,<2",
+  "PyGithub<3,>=2.6.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/flathub-infra/flathub-submission-checker"
+Repository = "https://github.com/flathub-infra/flathub-submission-checker.git"
+
+[project.scripts]
+flathub-submission-checker = "flathub_submission_checker.__main__:main"
+
+[dependency-groups]
+dev = [
+  "pre-commit<5,>=3.8.0",
+  "mypy<3,>=1.11.2",
+  "ruff<1,>=0.6.7",
+  "pytest<10,>=8.3.3",
+]
+
+[tool.mypy]
+show_error_codes = true
+strict = true
+extra_checks = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unused_configs = true
+warn_unused_ignores = true
+cache_dir = "~/.cache/mypy"
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disable_error_code = ["no-untyped-def"]
+
+[tool.ruff]
+line-length = 88
+include = ["*.py"]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+  "A",
+  "ARG",
+  "B",
+  "C4",
+  "DTZ",
+  "E",
+  "ERA",
+  "F",
+  "I",
+  "ICN",
+  "PIE",
+  "PL",
+  "Q",
+  "RET",
+  "RSE",
+  "RUF",
+  "S",
+  "SIM",
+  "T201",
+  "UP",
+  "W",
+]
+
+ignore = [
+  "PLR2004",
+  "PLR0911",
+  "PLR0912",
+  "PLR0913",
+  "PLR0915",
+  "S105",
+  "S607",
+  "S603",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "E501"]
+
+[tool.ruff.format]
+line-ending = "lf"
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-vvv -m 'not integration'"
+markers = [
+    "integration: slow integration tests requires network access",
+]

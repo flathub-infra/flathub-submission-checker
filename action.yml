@@ -1,0 +1,6 @@
+name: "Flathub submission checker"
+description: "Flathub submission checker"
+author: "Flathub contributors"
+runs:
+  using: 'docker'
+  image: "docker://ghcr.io/flathub-infra/flathub-submission-checker:latest"

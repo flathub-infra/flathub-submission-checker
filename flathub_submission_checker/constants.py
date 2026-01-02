@@ -1,0 +1,123 @@
+import re
+
+GITHUB_BASE_URL = "https://github.com"
+FLATHUB_REPO_SLUG = "flathub/flathub"
+FLATHUB_DOCS_BASE_URL = "https://docs.flathub.org/docs/for-app-authors"
+
+REQUIREMENTS_URL = f"{FLATHUB_DOCS_BASE_URL}/requirements"
+SUBMISSION_URL = f"{FLATHUB_DOCS_BASE_URL}/submission"
+VERIFICATION_URL = f"{FLATHUB_DOCS_BASE_URL}/verification"
+MASTER_BRANCH_URL = f"{GITHUB_BASE_URL}/{FLATHUB_REPO_SLUG}/commits/master/"
+PR_TEMPLATE_URL = (
+    f"{GITHUB_BASE_URL}/{FLATHUB_REPO_SLUG}/blob/master/"
+    ".github/pull_request_template.md?plain=1"
+)
+
+
+LABEL_WORK_IN_PROGRESS = "work-in-progress"
+LABEL_PR_CHECK_BLOCKED = "pr-check-blocked"
+LABEL_BLOCKED = "blocked"
+LABEL_AWAITING_REVIEW = "awaiting-review"
+LABEL_AWAITING_CHANGES = "awaiting-changes"
+LABEL_AWAITING_UPSTREAM = "awaiting-upstream"
+LABEL_REVIEWED_WAITING = "reviewed-waiting"
+LABEL_STALE = "Stale"
+LABEL_LEAVE_OPEN = "leave-open"
+
+
+BOT_LOGINS = frozenset({"flathubbot", "github-actions", "github-actions[bot]"})
+
+ADD_PREFIX_RE = re.compile(r"^add\s+", re.IGNORECASE)
+APPID_COMPONENT_RE = re.compile(r"^[A-Za-z_][\w\-]*$")
+FLATHUB_JSON_RE = re.compile(r".*/flathub\.json$")
+TOPLEVEL_MANIFEST_RE = re.compile(r"^[^/]+\.(ya?ml|json)$")
+CHECKLIST_LINE_RE = re.compile(r"^- \[([ xX])\]\s*(.+)$", re.MULTILINE)
+
+VIDEO_LINK_RE = re.compile(r"https?://\S+")
+VIDEO_NA_RE = re.compile(r"\b(n/?a|no\s+video(?:\s+available)?)\b", re.IGNORECASE)
+
+ROLE_CHECKLIST_RE = re.compile(
+    r"I am (?:an?|the)\s+(?:author|developer|contributor|upstream contributor)\b"
+    r"|I contacted upstream",
+    re.IGNORECASE,
+)
+
+VIDEO_CHECKLIST_ITEM = (
+    "Please attach a video showcasing the application on Linux using the Flatpak."
+)
+VIDEO_LOOKAHEAD_LINES = 2
+
+CHECKLIST_ITEMS = (
+    "Please describe the application briefly.",
+    "Please attach a video showcasing the application on Linux using the Flatpak.",
+    "The Flatpak ID follows all the rules listed in the",
+    "I have read and followed all the",
+)
+
+REQUIRED_CHECKLIST_COUNT = len(CHECKLIST_ITEMS) + 1
+MAX_UNCHECKED_ITEMS_ALLOWED = 1
+
+MASTER_COMMIT_AUTHOR_EMAIL = "mclasen@redhat.com"
+MASTER_COMMIT_MESSAGE = "Add some instructions"
+
+EXCLUDED_ID_PREFIXES = (
+    "com.github.",
+    "com.gitlab.",
+    "io.github.",
+    "io.gitlab.",
+    "org.gnome.gitlab.",
+    "org.gnome.World.",
+    "org.gnome.design",
+    "org.kde.",
+    "org.gnome.",
+)
+
+RUNTIME_PREFIXES = (
+    "org.freedesktop.Platform.",
+    "org.freedesktop.Sdk.",
+    "org.gnome.Platform.",
+    "org.gnome.Sdk.",
+    "org.gtk.Gtk3theme.",
+    "org.kde.KStyle.",
+    "org.kde.Platform.",
+    "org.kde.PlatformInputContexts.",
+    "org.kde.PlatformTheme.",
+    "org.kde.Sdk.",
+    "org.kde.WaylandDecoration.",
+    "org.freedesktop.LinuxAudio.",
+)
+
+CODE_HOST_PREFIXES = (
+    "io.frama.",
+    "page.codeberg.",
+    "io.sourceforge.",
+    "net.sourceforge.",
+)
+
+ADDON_COMPONENTS = frozenset(
+    {"addon", "addons", "extension", "extensions", "plugin", "plugins"}
+)
+
+BUILD_SUCCESS_COMMENT = "[Test build succeeded]"
+
+BUILD_START_COMMENT = (
+    "Starting a test build of the submission. Please fix any\n"
+    "issues reported in the build log. You can restart the build\n"
+    "once the issue is fixed by commenting the phrase below.\n\n"
+    "bot, build"
+)
+BUILD_START_COMMENT_PARTIAL = "Starting a test build of the submission"
+
+BASE_REVIEW_COMMENT = (
+    "This pull request is temporarily marked as blocked as some\n"
+    "automated checks failed on it. Please make sure the\n"
+    "following items are done:"
+)
+REVIEW_COMMENT_PARTIAL = "This pull request is temporarily marked as blocked as some"
+
+DOMAIN_COMMENT_PARTIAL = "The domain to be used for verification is"
+
+SPAM_CLOSE_COMMENT = (
+    "This pull request does not follow the submission guidelines "
+    "and has been closed automatically."
+)
