@@ -56,7 +56,7 @@ NON_ROLE_ITEMS = """\
 
 
 def checklist_body(role_line: str = ROLE_LINE, unchecked: int = 0) -> str:
-    lines = NON_ROLE_ITEMS.strip().split("\n")
+    lines: list[str] = [*NON_ROLE_ITEMS.strip().split("\n")]
     checklist_line_indices = [
         i for i, line in enumerate(lines) if line.startswith("- [x]")
     ]
