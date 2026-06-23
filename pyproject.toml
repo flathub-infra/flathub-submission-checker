@@ -11,7 +11,7 @@ exclude = ["**/__pycache__"]
 
 [project]
 name = "flathub_submission_checker"
-version = "0.0.0"
+version = "0.1.0"
 description = "Flathub submission checker"
 authors = [
   {name = "bbhtt", email = "bbhtt@bbhtt.in"},
