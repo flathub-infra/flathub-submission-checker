@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 def should_start_build(ctx: PRContext) -> bool:
     already_building_or_built = (
         ctx.comment_exists_any(BUILD_START_COMMENT_PARTIAL)
+        or ctx.latest_build_ongoing()
         or ctx.latest_build_succeeded()
     )
     is_blocked = ctx.has_any_label(LABEL_PR_CHECK_BLOCKED, LABEL_BLOCKED)

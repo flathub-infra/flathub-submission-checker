@@ -4,6 +4,7 @@ from typing import Any, NamedTuple, Protocol
 
 from flathub_submission_checker.constants import (
     BOT_LOGINS,
+    BUILD_STARTED_COMMENT_PARTIAL,
     BUILD_SUCCESS_COMMENT,
     MASTER_COMMIT_AUTHOR_EMAIL,
     MASTER_COMMIT_MESSAGE,
@@ -123,6 +124,13 @@ class PRContext:
         return (
             last_build_comment is not None
             and BUILD_SUCCESS_COMMENT in last_build_comment
+        )
+
+    def latest_build_ongoing(self) -> bool:
+        last_build_comment = self._latest_build_comment()
+        return (
+            last_build_comment is not None
+            and BUILD_STARTED_COMMENT_PARTIAL in last_build_comment
         )
 
     def record_comment(self, body: str) -> None:

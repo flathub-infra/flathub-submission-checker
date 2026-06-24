@@ -628,6 +628,14 @@ class TestShouldStartBuild:
         ctx = make_pr_context(comment_lines=[f"Test build {BUILD_SUCCESS_COMMENT}"])
         assert should_start_build(ctx) is False
 
+    def test_skipped_if_build_ongoing(self):
+        ctx = make_pr_context(
+            comment_lines=[
+                "🚧 Started [test build](https://example.com/actions/runs/1)."
+            ]
+        )
+        assert should_start_build(ctx) is False
+
 
 class TestShouldPostDomainComment:
     def test_posts_on_fresh_pr(self):
