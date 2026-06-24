@@ -26,7 +26,6 @@ from flathub_submission_checker.parsing import (
     count_unchecked_relevant_items,
     get_appid_from_pr_title,
     has_missing_video,
-    parse_checklist,
 )
 
 logger = logging.getLogger(__name__)
@@ -89,7 +88,7 @@ def get_domain(appid: str) -> str | None:
 
 
 def is_considered_spam(
-    files: list[str], body: str, labels: set[str]
+    checklist: list[tuple[bool, str]], files: list[str], body: str, labels: set[str]
 ) -> tuple[bool, str]:
     if files and all("/" in f for f in files):
         logger.info(
@@ -97,13 +96,11 @@ def is_considered_spam(
         )
         return (True, "Files not in toplevel")
 
-    checklist = parse_checklist(body)
-
     if not checklist_matches_template(checklist):
         logger.info("Checklist missing or altered, flagging as spam")
         return (True, "Checklist(s) not completed or missing")
 
-    if LABEL_MIGRATE not in labels and has_missing_video(body):
+    if LABEL_MIGRATE not in labels and has_missing_video(body, checklist):
         logger.info(
             "Video checklist item missing, unchecked, or has no link, flagging as spam"
         )
@@ -122,9 +119,10 @@ def is_considered_spam(
     return (False, "")
 
 
-def validate_pr_structure(ctx: PRContext) -> ValidationResult:
+def validate_pr_structure(
+    ctx: PRContext, checklist: list[tuple[bool, str]]
+) -> ValidationResult:
     appid = get_appid_from_pr_title(ctx.title)
-    checklist = parse_checklist(ctx.body)
 
     checks: list[tuple[bool, str]] = [
         (appid is not None, '- PR title is "Add $FLATPAK_ID"'),

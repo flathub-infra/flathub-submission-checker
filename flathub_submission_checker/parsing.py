@@ -109,8 +109,7 @@ def count_unchecked_relevant_items(checklist: list[tuple[bool, str]]) -> int:
     return unchecked_count
 
 
-def has_missing_video(body: str) -> bool:
-    checklist = parse_checklist(body)
+def has_missing_video(body: str, checklist: list[tuple[bool, str]]) -> bool:
     video_checked = any(
         checked for checked, text in checklist if VIDEO_CHECKLIST_ITEM in text
     )

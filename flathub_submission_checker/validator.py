@@ -18,6 +18,7 @@ from flathub_submission_checker.constants import (
 )
 from flathub_submission_checker.github_client import GitHubClient
 from flathub_submission_checker.models import PRContext
+from flathub_submission_checker.parsing import parse_checklist
 from flathub_submission_checker.validation import (
     build_domain_comment,
     build_review_comment,
@@ -238,7 +239,11 @@ class PRValidator:
             logger.info("PR #%s has leave-open label, skipping", ctx.number)
             return True
 
-        spam_ret, spam_comment = is_considered_spam(ctx.files, ctx.body, ctx.labels)
+        checklist = parse_checklist(ctx.body)
+
+        spam_ret, spam_comment = is_considered_spam(
+            checklist, ctx.files, ctx.body, ctx.labels
+        )
         if spam_ret:
             logger.info("PR #%s considered spam, closing", ctx.number)
             SPAM_COMMENT = f"{SPAM_CLOSE_COMMENT} {spam_comment}."
@@ -252,7 +257,7 @@ class PRValidator:
             )
             ok = self.client.remove_labels(ctx.number, LABEL_WORK_IN_PROGRESS) and ok
 
-        validation = validate_pr_structure(ctx)
+        validation = validate_pr_structure(ctx, checklist)
         if validation.is_valid:
             logger.info("PR #%s passed structure validation", ctx.number)
             ok = self.process_unblocked_pr(ctx, validation.domain) and ok

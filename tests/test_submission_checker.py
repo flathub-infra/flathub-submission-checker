@@ -348,26 +348,43 @@ class TestCountUncheckedRelevantItems:
 
 class TestIsConsideredSpam:
     def test_valid_submission_is_not_spam(self):
-        assert is_considered_spam(VALID_FILES, FULL_CHECKLIST_BODY, set()) == (
+        assert is_considered_spam(
+            parse_checklist(FULL_CHECKLIST_BODY),
+            VALID_FILES,
+            FULL_CHECKLIST_BODY,
+            set(),
+        ) == (
             False,
             "",
         )
 
     def test_all_files_in_subdirectory_is_spam(self):
         nested_files = ["some/nested/file.json", "another/nested/file.yaml"]
-        assert is_considered_spam(nested_files, FULL_CHECKLIST_BODY, set()) == (
+        assert is_considered_spam(
+            parse_checklist(FULL_CHECKLIST_BODY),
+            nested_files,
+            FULL_CHECKLIST_BODY,
+            set(),
+        ) == (
             True,
             "Files not in toplevel",
         )
 
     def test_missing_checklist_template_is_spam(self):
-        assert is_considered_spam(VALID_FILES, NO_CHECKLIST_BODY, set()) == (
+        assert is_considered_spam(
+            parse_checklist(NO_CHECKLIST_BODY), VALID_FILES, NO_CHECKLIST_BODY, set()
+        ) == (
             True,
             "Checklist(s) not completed or missing",
         )
 
     def test_incomplete_checklist_template_is_not_spam(self):
-        assert is_considered_spam(VALID_FILES, MISSING_ITEM_CHECKLIST_BODY, set()) == (
+        assert is_considered_spam(
+            parse_checklist(MISSING_ITEM_CHECKLIST_BODY),
+            VALID_FILES,
+            MISSING_ITEM_CHECKLIST_BODY,
+            set(),
+        ) == (
             False,
             "",
         )
@@ -385,7 +402,7 @@ class TestIsConsideredSpam:
         lines.append(f"- [x] {ROLE_LINE}")
         body = "\n".join(lines) + "\n"
 
-        assert is_considered_spam(VALID_FILES, body, set()) == (
+        assert is_considered_spam(parse_checklist(body), VALID_FILES, body, set()) == (
             True,
             "Checklist(s) not completed or missing",
         )
@@ -394,7 +411,7 @@ class TestIsConsideredSpam:
         body = checklist_body().replace(
             "      https://example.com/demo-video.mp4\n", ""
         )
-        assert is_considered_spam(VALID_FILES, body, set()) == (
+        assert is_considered_spam(parse_checklist(body), VALID_FILES, body, set()) == (
             True,
             "Video checklist requirement not met",
         )
@@ -403,13 +420,16 @@ class TestIsConsideredSpam:
         body = checklist_body().replace(
             "      https://example.com/demo-video.mp4\n", ""
         )
-        assert is_considered_spam(VALID_FILES, body, {"migrate-app-id"}) == (
+        assert is_considered_spam(
+            parse_checklist(body), VALID_FILES, body, {"migrate-app-id"}
+        ) == (
             False,
             "",
         )
 
     def test_one_unchecked_item_is_not_spam(self):
-        assert is_considered_spam(VALID_FILES, checklist_body(unchecked=1), set()) == (
+        body = checklist_body(unchecked=1)
+        assert is_considered_spam(parse_checklist(body), VALID_FILES, body, set()) == (
             False,
             "",
         )
@@ -528,26 +548,26 @@ class TestValidatePRStructure:
             body=FULL_CHECKLIST_BODY,
             files=["com.example.foobar.json", "cargo-sources.json"],
         )
-        result = validate_pr_structure(ctx)
+        result = validate_pr_structure(ctx, parse_checklist(FULL_CHECKLIST_BODY))
         assert result.is_valid is True
         assert result.reasons == []
         assert result.domain == "example.com"
 
     def test_wrong_title_format_fails(self):
         result = validate_pr_structure(
-            make_pr_context(title="Update com.example.foobar")
+            make_pr_context(title="Update com.example.foobar"), []
         )
         assert result.is_valid is False
         assert any("PR title" in r for r in result.reasons)
 
     def test_master_commit_present_fails(self):
-        result = validate_pr_structure(make_pr_context(has_master_commit_=True))
+        result = validate_pr_structure(make_pr_context(has_master_commit_=True), [])
         assert result.is_valid is False
         assert any("master branch" in r for r in result.reasons)
 
     def test_flathub_json_in_subdirectory_fails(self):
         ctx = make_pr_context(files=["com.example.foobar.json", "subdir/flathub.json"])
-        result = validate_pr_structure(ctx)
+        result = validate_pr_structure(ctx, [])
         assert result.is_valid is False
         assert any("flathub.json" in r for r in result.reasons)
 
@@ -555,13 +575,14 @@ class TestValidatePRStructure:
         ctx = make_pr_context(
             files=["subdir/com.example.foobar.json", "subdir/cargo-sources.json"]
         )
-        result = validate_pr_structure(ctx)
+        result = validate_pr_structure(ctx, [])
         assert result.is_valid is False
         assert any("manifest" in r for r in result.reasons)
 
     def test_incomplete_checklist_fails(self):
-        ctx = make_pr_context(body=checklist_body(unchecked=2))
-        result = validate_pr_structure(ctx)
+        body = checklist_body(unchecked=2)
+        ctx = make_pr_context(body=body)
+        result = validate_pr_structure(ctx, parse_checklist(body))
         assert result.is_valid is False
         assert any("checklists" in r for r in result.reasons)
 
@@ -571,7 +592,10 @@ class TestValidatePRStructure:
             body=FULL_CHECKLIST_BODY,
             files=["io.github.user.App.json"],
         )
-        assert validate_pr_structure(ctx).domain is None
+        assert (
+            validate_pr_structure(ctx, parse_checklist(FULL_CHECKLIST_BODY)).domain
+            is None
+        )
 
     def test_multiple_failures_all_reported(self):
         ctx = make_pr_context(
@@ -579,7 +603,9 @@ class TestValidatePRStructure:
             body=MISSING_ITEM_CHECKLIST_BODY,
             has_master_commit_=True,
         )
-        result = validate_pr_structure(ctx)
+        result = validate_pr_structure(
+            ctx, parse_checklist(MISSING_ITEM_CHECKLIST_BODY)
+        )
         assert result.is_valid is False
         assert len(result.reasons) >= 2
 
@@ -693,21 +719,21 @@ class TestHasMissingVideo:
             "- [x] Please attach a video showcasing the application on Linux "
             "using the Flatpak. https://example.com/video.mp4\n"
         )
-        assert has_missing_video(body) is False
+        assert has_missing_video(body, parse_checklist(body)) is False
 
     def test_video_link_on_next_line_is_not_missing(self):
         body = (
             "- [x] Please attach a video showcasing the application on Linux "
             "using the Flatpak.\nhttps://example.com/video.mp4\n"
         )
-        assert has_missing_video(body) is False
+        assert has_missing_video(body, parse_checklist(body)) is False
 
     def test_no_link_after_item_is_missing(self):
         body = (
             "- [x] Please attach a video showcasing the application on Linux "
             "using the Flatpak.\n- [x] Some other item.\n"
         )
-        assert has_missing_video(body) is True
+        assert has_missing_video(body, parse_checklist(body)) is True
 
     @pytest.mark.parametrize("marker", ["N/A", "n/a", "NA", "no video available"])
     def test_marked_na_is_missing(self, marker):
@@ -715,14 +741,14 @@ class TestHasMissingVideo:
             "- [x] Please attach a video showcasing the application on Linux "
             f"using the Flatpak. {marker}\n"
         )
-        assert has_missing_video(body) is True
+        assert has_missing_video(body, parse_checklist(body)) is True
 
     def test_unchecked_video_item_with_link_is_still_missing(self):
         body = (
             "- [ ] Please attach a video showcasing the application on Linux "
             "using the Flatpak. https://example.com/video.mp4\n"
         )
-        assert has_missing_video(body) is True
+        assert has_missing_video(body, parse_checklist(body)) is True
 
     def test_video_link_two_lines_down_with_blank_line_is_not_missing(self):
         body = (
@@ -731,7 +757,7 @@ class TestHasMissingVideo:
             "\n"
             "https://github.com/user-attachments/assets/9f827b16-c627-4f47-8067-4ac0a108fcad\n"
         )
-        assert has_missing_video(body) is False
+        assert has_missing_video(body, parse_checklist(body)) is False
 
     def test_link_three_lines_down_exceeds_lookahead_is_missing(self):
         body = (
@@ -741,7 +767,7 @@ class TestHasMissingVideo:
             "\n"
             "https://example.com/video.mp4\n"
         )
-        assert has_missing_video(body) is True
+        assert has_missing_video(body, parse_checklist(body)) is True
 
     def test_lookahead_stops_at_next_checklist_item(self):
         body = (
@@ -750,10 +776,13 @@ class TestHasMissingVideo:
             "\n"
             "- [x] I am an author to the project. Link: https://example.com/issues/1\n"
         )
-        assert has_missing_video(body) is True
+        assert has_missing_video(body, parse_checklist(body)) is True
 
     def test_video_item_absent_from_body_is_missing(self):
-        assert has_missing_video(NO_CHECKLIST_BODY) is True
+        assert (
+            has_missing_video(NO_CHECKLIST_BODY, parse_checklist(NO_CHECKLIST_BODY))
+            is True
+        )
 
 
 class TestValidatePR:
