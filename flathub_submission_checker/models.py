@@ -112,9 +112,18 @@ class PRContext:
     def has_any_label(self, *labels: str) -> bool:
         return any(label in self.labels for label in labels)
 
+    def _latest_build_comment(self) -> str | None:
+        build_lines = [
+            line for line in self.comment_lines if "test build" in line.lower()
+        ]
+        return build_lines[-1] if build_lines else None
+
     def latest_build_succeeded(self) -> bool:
-        build_lines = [line for line in self.comment_lines if "Test build" in line]
-        return bool(build_lines) and bool(BUILD_SUCCESS_COMMENT in build_lines[-1])
+        last_build_comment = self._latest_build_comment()
+        return (
+            last_build_comment is not None
+            and BUILD_SUCCESS_COMMENT in last_build_comment
+        )
 
     def record_comment(self, body: str) -> None:
         self.comment_lines.extend(body.split("\n"))

@@ -100,6 +100,7 @@ ADDON_COMPONENTS = frozenset(
 )
 
 BUILD_SUCCESS_COMMENT = "[Test build succeeded]"
+BUILD_STARTED_COMMENT_PARTIAL = "Started [test build]"
 
 BUILD_START_COMMENT = (
     "Starting a test build of the submission. Please fix any\n"
