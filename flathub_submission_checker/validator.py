@@ -166,11 +166,6 @@ class PRValidator:
         if matched is None:
             logger.info("Failed to match any filtered PRs")
             return None
-        logger.info(
-            "Found %s %s PRs matching criteria",
-            len(matched),
-            "draft" if is_draft else "non-draft",
-        )
         return matched
 
     def _comment(self, ctx: PRContext, body: str) -> bool:

@@ -110,7 +110,12 @@ class PyGithubClient:
                     continue
                 matched.append(pr.number)
 
-            logger.info("Fetched %s PR(s): %s", len(matched), matched)
+            logger.info(
+                "Fetched %s %s PR(s): %s",
+                len(matched),
+                "draft" if is_draft else "non-draft",
+                matched,
+            )
             return matched
         except GITHUB_CALL_EXCEPTIONS as err:
             logger.error("Failed to fetch PR list (is_draft=%s): %s", is_draft, err)
