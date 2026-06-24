@@ -522,17 +522,17 @@ class TestPRContextMethods:
         ctx = make_pr_context(
             comment_lines=["Test build failed", "Test build [Test build succeeded]"]
         )
-        assert ctx.latest_build_succeeded(BUILD_SUCCESS_COMMENT) is True
+        assert ctx.latest_build_succeeded() is True
 
     def test_latest_build_not_succeeded_when_last_line_is_failure(self):
         ctx = make_pr_context(
             comment_lines=["Test build [Test build succeeded]", "Test build failed"]
         )
-        assert ctx.latest_build_succeeded(BUILD_SUCCESS_COMMENT) is False
+        assert ctx.latest_build_succeeded() is False
 
     def test_latest_build_not_succeeded_with_no_build_lines(self):
         ctx = make_pr_context(comment_lines=["Some unrelated comment"])
-        assert ctx.latest_build_succeeded(BUILD_SUCCESS_COMMENT) is False
+        assert ctx.latest_build_succeeded() is False
 
     def test_record_comment_appends_lines(self):
         ctx = make_pr_context(comment_lines=[])

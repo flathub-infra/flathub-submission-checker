@@ -4,6 +4,7 @@ from typing import Any, NamedTuple, Protocol
 
 from flathub_submission_checker.constants import (
     BOT_LOGINS,
+    BUILD_SUCCESS_COMMENT,
     MASTER_COMMIT_AUTHOR_EMAIL,
     MASTER_COMMIT_MESSAGE,
 )
@@ -111,9 +112,9 @@ class PRContext:
     def has_any_label(self, *labels: str) -> bool:
         return any(label in self.labels for label in labels)
 
-    def latest_build_succeeded(self, build_success_comment: str) -> bool:
+    def latest_build_succeeded(self) -> bool:
         build_lines = [line for line in self.comment_lines if "Test build" in line]
-        return bool(build_lines) and bool(build_success_comment in build_lines[-1])
+        return bool(build_lines) and bool(BUILD_SUCCESS_COMMENT in build_lines[-1])
 
     def record_comment(self, body: str) -> None:
         self.comment_lines.extend(body.split("\n"))

@@ -4,7 +4,6 @@ from datetime import UTC, datetime, timedelta
 from flathub_submission_checker.constants import (
     BUILD_START_COMMENT,
     BUILD_START_COMMENT_PARTIAL,
-    BUILD_SUCCESS_COMMENT,
     LABEL_AWAITING_CHANGES,
     LABEL_AWAITING_REVIEW,
     LABEL_AWAITING_UPSTREAM,
@@ -30,9 +29,10 @@ logger = logging.getLogger(__name__)
 
 
 def should_start_build(ctx: PRContext) -> bool:
-    already_building_or_built = ctx.comment_exists_any(
-        BUILD_START_COMMENT_PARTIAL
-    ) or ctx.latest_build_succeeded(BUILD_SUCCESS_COMMENT)
+    already_building_or_built = (
+        ctx.comment_exists_any(BUILD_START_COMMENT_PARTIAL)
+        or ctx.latest_build_succeeded()
+    )
     is_blocked = ctx.has_any_label(LABEL_PR_CHECK_BLOCKED, LABEL_BLOCKED)
 
     result = not is_blocked and not already_building_or_built
@@ -107,7 +107,7 @@ def should_promote_to_awaiting_review(ctx: PRContext, unresolved_threads: int) -
         LABEL_PR_CHECK_BLOCKED,
         LABEL_BLOCKED,
     )
-    build_succeeded = ctx.latest_build_succeeded(BUILD_SUCCESS_COMMENT)
+    build_succeeded = ctx.latest_build_succeeded()
 
     result = (
         has_awaiting_changes
