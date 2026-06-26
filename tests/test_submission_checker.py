@@ -32,6 +32,7 @@ from flathub_submission_checker.validation import (
     build_domain_comment,
     build_review_comment,
     get_domain,
+    is_appid_addon,
     is_considered_spam,
     validate_pr_structure,
 )
@@ -258,6 +259,20 @@ class TestGetDomain:
         assert "example" in domain
 
 
+class TestIsAppidAddon:
+    def test_none_is_not_addon(self):
+        assert is_appid_addon(None) is False
+
+    def test_too_few_components_is_not_addon(self):
+        assert is_appid_addon("com.foo") is False
+
+    def test_addon_component_detected(self):
+        assert is_appid_addon("org.freedesktop.Sdk.Extension.foobar") is True
+
+    def test_non_addon_component_not_detected(self):
+        assert is_appid_addon("com.example.foobar") is False
+
+
 class TestParseChecklist:
     def test_parses_checked_and_unchecked_items(self):
         body = "- [x] Do something\n- [X] Do another\n- [ ] Skip this\n"
@@ -353,6 +368,7 @@ class TestIsConsideredSpam:
             VALID_FILES,
             FULL_CHECKLIST_BODY,
             set(),
+            "com.foo.bar",
         ) == (
             False,
             "",
@@ -365,6 +381,7 @@ class TestIsConsideredSpam:
             nested_files,
             FULL_CHECKLIST_BODY,
             set(),
+            "com.foo.bar",
         ) == (
             True,
             "Files not in toplevel",
@@ -372,7 +389,11 @@ class TestIsConsideredSpam:
 
     def test_missing_checklist_template_is_spam(self):
         assert is_considered_spam(
-            parse_checklist(NO_CHECKLIST_BODY), VALID_FILES, NO_CHECKLIST_BODY, set()
+            parse_checklist(NO_CHECKLIST_BODY),
+            VALID_FILES,
+            NO_CHECKLIST_BODY,
+            set(),
+            "com.foo.bar",
         ) == (
             True,
             "Checklist(s) not completed or missing",
@@ -384,6 +405,7 @@ class TestIsConsideredSpam:
             VALID_FILES,
             MISSING_ITEM_CHECKLIST_BODY,
             set(),
+            "com.foo.bar",
         ) == (
             False,
             "",
@@ -402,7 +424,13 @@ class TestIsConsideredSpam:
         lines.append(f"- [x] {ROLE_LINE}")
         body = "\n".join(lines) + "\n"
 
-        assert is_considered_spam(parse_checklist(body), VALID_FILES, body, set()) == (
+        assert is_considered_spam(
+            parse_checklist(body),
+            VALID_FILES,
+            body,
+            set(),
+            "com.foo.bar",
+        ) == (
             True,
             "Checklist(s) not completed or missing",
         )
@@ -411,7 +439,13 @@ class TestIsConsideredSpam:
         body = checklist_body().replace(
             "      https://example.com/demo-video.mp4\n", ""
         )
-        assert is_considered_spam(parse_checklist(body), VALID_FILES, body, set()) == (
+        assert is_considered_spam(
+            parse_checklist(body),
+            VALID_FILES,
+            body,
+            set(),
+            "com.foo.bar",
+        ) == (
             True,
             "Video checklist requirement not met",
         )
@@ -421,7 +455,11 @@ class TestIsConsideredSpam:
             "      https://example.com/demo-video.mp4\n", ""
         )
         assert is_considered_spam(
-            parse_checklist(body), VALID_FILES, body, {"migrate-app-id"}
+            parse_checklist(body),
+            VALID_FILES,
+            body,
+            {"migrate-app-id"},
+            "com.foo.bar",
         ) == (
             False,
             "",
@@ -429,13 +467,49 @@ class TestIsConsideredSpam:
 
     def test_one_unchecked_item_is_not_spam(self):
         body = checklist_body(unchecked=1)
-        assert is_considered_spam(parse_checklist(body), VALID_FILES, body, set()) == (
+        assert is_considered_spam(
+            parse_checklist(body),
+            VALID_FILES,
+            body,
+            set(),
+            "com.foo.bar",
+        ) == (
             False,
             "",
         )
 
     def test_unchecked_boundary_matches_max_allowed_constant(self):
         assert MAX_UNCHECKED_ITEMS_ALLOWED == 1
+
+    def test_addon_appid_skips_missing_video_check(self):
+        body = checklist_body().replace(
+            "      https://example.com/demo-video.mp4\n", ""
+        )
+        assert is_considered_spam(
+            parse_checklist(body),
+            VALID_FILES,
+            body,
+            set(),
+            "org.freedesktop.Sdk.Extension.foobar",
+        ) == (
+            False,
+            "",
+        )
+
+    def test_missing_appid_with_missing_video_is_spam(self):
+        body = checklist_body().replace(
+            "      https://example.com/demo-video.mp4\n", ""
+        )
+        assert is_considered_spam(
+            parse_checklist(body),
+            VALID_FILES,
+            body,
+            set(),
+            None,
+        ) == (
+            True,
+            "Video checklist requirement not met",
+        )
 
 
 class TestHasMasterCommit:
@@ -548,26 +622,30 @@ class TestValidatePRStructure:
             body=FULL_CHECKLIST_BODY,
             files=["com.example.foobar.json", "cargo-sources.json"],
         )
-        result = validate_pr_structure(ctx, parse_checklist(FULL_CHECKLIST_BODY))
+        result = validate_pr_structure(
+            ctx, parse_checklist(FULL_CHECKLIST_BODY), "com.example.foobar"
+        )
         assert result.is_valid is True
         assert result.reasons == []
         assert result.domain == "example.com"
 
     def test_wrong_title_format_fails(self):
         result = validate_pr_structure(
-            make_pr_context(title="Update com.example.foobar"), []
+            make_pr_context(title="Update com.example.foobar"), [], None
         )
         assert result.is_valid is False
         assert any("PR title" in r for r in result.reasons)
 
     def test_master_commit_present_fails(self):
-        result = validate_pr_structure(make_pr_context(has_master_commit_=True), [])
+        result = validate_pr_structure(
+            make_pr_context(has_master_commit_=True), [], None
+        )
         assert result.is_valid is False
         assert any("master branch" in r for r in result.reasons)
 
     def test_flathub_json_in_subdirectory_fails(self):
         ctx = make_pr_context(files=["com.example.foobar.json", "subdir/flathub.json"])
-        result = validate_pr_structure(ctx, [])
+        result = validate_pr_structure(ctx, [], None)
         assert result.is_valid is False
         assert any("flathub.json" in r for r in result.reasons)
 
@@ -575,14 +653,14 @@ class TestValidatePRStructure:
         ctx = make_pr_context(
             files=["subdir/com.example.foobar.json", "subdir/cargo-sources.json"]
         )
-        result = validate_pr_structure(ctx, [])
+        result = validate_pr_structure(ctx, [], None)
         assert result.is_valid is False
         assert any("manifest" in r for r in result.reasons)
 
     def test_incomplete_checklist_fails(self):
         body = checklist_body(unchecked=2)
         ctx = make_pr_context(body=body)
-        result = validate_pr_structure(ctx, parse_checklist(body))
+        result = validate_pr_structure(ctx, parse_checklist(body), None)
         assert result.is_valid is False
         assert any("checklists" in r for r in result.reasons)
 
@@ -593,7 +671,9 @@ class TestValidatePRStructure:
             files=["io.github.user.App.json"],
         )
         assert (
-            validate_pr_structure(ctx, parse_checklist(FULL_CHECKLIST_BODY)).domain
+            validate_pr_structure(
+                ctx, parse_checklist(FULL_CHECKLIST_BODY), "io.github.user.App"
+            ).domain
             is None
         )
 
@@ -604,7 +684,7 @@ class TestValidatePRStructure:
             has_master_commit_=True,
         )
         result = validate_pr_structure(
-            ctx, parse_checklist(MISSING_ITEM_CHECKLIST_BODY)
+            ctx, parse_checklist(MISSING_ITEM_CHECKLIST_BODY), "com.example.foobar"
         )
         assert result.is_valid is False
         assert len(result.reasons) >= 2

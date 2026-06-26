@@ -24,7 +24,6 @@ from flathub_submission_checker.parsing import (
     checklist_fully_checked,
     checklist_matches_template,
     count_unchecked_relevant_items,
-    get_appid_from_pr_title,
     has_missing_video,
 )
 
@@ -33,6 +32,12 @@ logger = logging.getLogger(__name__)
 
 def demangle(name: str) -> str:
     return name.removeprefix("_").replace("_", "-")
+
+
+def is_appid_addon(appid: str | None) -> bool:
+    if not appid or appid.count(".") < 2:
+        return False
+    return appid.split(".")[-2].lower() in ADDON_COMPONENTS
 
 
 def get_domain(appid: str) -> str | None:
@@ -50,7 +55,7 @@ def get_domain(appid: str) -> str | None:
         logger.info("Flatpak ID is excluded for BaseApps: %s", appid)
         return None
 
-    if appid.split(".")[-2].lower() in ADDON_COMPONENTS:
+    if is_appid_addon(appid):
         logger.info("Flatpak ID is excluded as it is in ADDON_COMPONENTS: %s", appid)
         return None
 
@@ -88,7 +93,11 @@ def get_domain(appid: str) -> str | None:
 
 
 def is_considered_spam(
-    checklist: list[tuple[bool, str]], files: list[str], body: str, labels: set[str]
+    checklist: list[tuple[bool, str]],
+    files: list[str],
+    body: str,
+    labels: set[str],
+    appid: str | None,
 ) -> tuple[bool, str]:
     if files and all("/" in f for f in files):
         logger.info(
@@ -100,7 +109,11 @@ def is_considered_spam(
         logger.info("Checklist missing or altered, flagging as spam")
         return (True, "Checklist(s) not completed or missing")
 
-    if LABEL_MIGRATE not in labels and has_missing_video(body, checklist):
+    if (
+        LABEL_MIGRATE not in labels
+        and has_missing_video(body, checklist)
+        and not is_appid_addon(appid)
+    ):
         logger.info(
             "Video checklist item missing, unchecked, or has no link, flagging as spam"
         )
@@ -120,10 +133,8 @@ def is_considered_spam(
 
 
 def validate_pr_structure(
-    ctx: PRContext, checklist: list[tuple[bool, str]]
+    ctx: PRContext, checklist: list[tuple[bool, str]], appid: str | None
 ) -> ValidationResult:
-    appid = get_appid_from_pr_title(ctx.title)
-
     checks: list[tuple[bool, str]] = [
         (appid is not None, '- PR title is "Add $FLATPAK_ID"'),
         (
