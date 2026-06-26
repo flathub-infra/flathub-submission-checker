@@ -3,4 +3,4 @@ description: "Flathub submission checker"
 author: "Flathub contributors"
 runs:
   using: 'docker'
-  image: "docker://ghcr.io/flathub-infra/flathub-submission-checker:latest"
+  image: "docker://ghcr.io/flathub-infra/flathub-submission-checker:latest@sha256:af8541866770363b4135190beb6235180d1fb8f8373236487cdb09ecdca31390"
