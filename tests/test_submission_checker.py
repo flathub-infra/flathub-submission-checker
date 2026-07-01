@@ -1081,6 +1081,43 @@ class TestComment:
         assert validator._comment(ctx, "Some comment body") is True
         client.post_comment.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "title,body,files,expected_reason",
+        [
+            pytest.param(
+                "Add com.example.foobar",
+                FULL_CHECKLIST_BODY,
+                ["some/nested/file.json", "another/nested/file.yaml"],
+                "Files not in toplevel",
+                id="files-not-toplevel",
+            ),
+            pytest.param(
+                "Add com.example.foobar",
+                NO_CHECKLIST_BODY,
+                VALID_FILES,
+                "Checklist(s) not completed or missing",
+                id="checklist-missing",
+            ),
+            pytest.param(
+                "Add com.example.foobar",
+                checklist_body().replace(
+                    "      https://example.com/demo-video.mp4\n", ""
+                ),
+                VALID_FILES,
+                "Video checklist requirement not met",
+                id="video-missing",
+            ),
+        ],
+    )
+    def test_close_comment_e2ee(self, title, body, files, expected_reason):
+        raw_pr = make_fake_raw_pr(title=title, body=body, files=files)
+        client = make_client(fetch_pr=raw_pr)
+        self._validator(client).validate_pr(7378)
+
+        posted = client.post_comment.call_args[0][1]
+        assert f"Diagnostics: {expected_reason}." in posted
+        assert posted.index(SPAM_CLOSE_COMMENT) < posted.index("Diagnostics:")
+
 
 class TestRun:
     def _validator(self, client) -> PRValidator:

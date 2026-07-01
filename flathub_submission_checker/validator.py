@@ -248,7 +248,7 @@ class PRValidator:
         )
         if spam_ret:
             logger.info("PR #%s considered spam, closing", ctx.number)
-            SPAM_COMMENT = f"{SPAM_CLOSE_COMMENT} {spam_comment}."
+            SPAM_COMMENT = f"{SPAM_CLOSE_COMMENT} Diagnostics: {spam_comment}."
             ok = self._comment(ctx, SPAM_COMMENT)
             return self.client.close_pr(ctx.number) and ok
 

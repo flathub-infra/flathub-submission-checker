@@ -121,7 +121,8 @@ DOMAIN_COMMENT_PARTIAL = "The domain to be used for verification is"
 
 SPAM_CLOSE_COMMENT = (
     "This pull request does not follow the submission guidelines "
-    "and has been closed automatically."
+    "and has been closed automatically. If this was done in error, please "
+    "post a comment below instead of opening or reopening (new) PRs."
 )
 
 COMMENT_FOOTER = (
