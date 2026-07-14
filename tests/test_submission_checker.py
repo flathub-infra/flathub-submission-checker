@@ -22,6 +22,7 @@ from flathub_submission_checker.constants import (
 )
 from flathub_submission_checker.models import PRContext, has_master_commit
 from flathub_submission_checker.parsing import (
+    _role_checklist_matches,
     checklist_fully_checked,
     checklist_matches_template,
     count_unchecked_relevant_items,
@@ -314,16 +315,20 @@ class TestChecklistMatchesTemplate:
         [
             ("I am the author/developer/upstream contributor to the project.", True),
             ("I am an author to the project.", True),
-            ("I am a contributor to the project, occasionally.", True),
-            ("I am the developer of the project", True),
+            ("I am a developer to the project.", True),
             ("I am an upstream contributor to the project.", True),
-            ("I am the maintainer to the project.", True),
-            ("I am an author to the codebase.", True),
+            (
+                "If not, I contacted upstream developers about this submission. Link: https://example.com/1",
+                True,
+            ),
+            ("I am a contributor to the project, occasionally.", False),
+            ("I am the developer of the project", False),
+            ("I am the maintainer to the project.", False),
+            ("I am an author to the codebase.", False),
         ],
     )
     def test_role_line_variants(self, role_line, expected):
-        checklist = parse_checklist(checklist_body(role_line=role_line))
-        assert checklist_matches_template(checklist) is expected
+        assert _role_checklist_matches(role_line) is expected
 
 
 class TestChecklistFullyChecked:

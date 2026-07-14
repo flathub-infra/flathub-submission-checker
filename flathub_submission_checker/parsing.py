@@ -54,7 +54,7 @@ def parse_checklist(body: str) -> list[tuple[bool, str]]:
 
 
 def _role_checklist_matches(text: str) -> bool:
-    return bool(ROLE_CHECKLIST_RE.search(text)) and "the project" in text.lower()
+    return bool(ROLE_CHECKLIST_RE.search(text))
 
 
 def _checklist_item_matches(text: str) -> bool:
