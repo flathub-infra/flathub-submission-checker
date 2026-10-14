@@ -151,7 +151,7 @@ class PRValidator:
     CUTOFF_DATE = datetime(2025, 5, 25, tzinfo=UTC)
     AUTO_CLOSE_CUTOFF_DATE = datetime(2026, 9, 9, tzinfo=UTC)
     PR_LIST_LIMIT = 30
-    PR_LIST_SCAN_LIMIT = 50
+    PR_LIST_SCAN_LIMIT = 75
 
     def __init__(self, client: GitHubClient, gh_repo: str) -> None:
         self.client = client
