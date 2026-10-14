@@ -1249,7 +1249,7 @@ class TestValidatePR:
         client.count_unresolved_review_threads.return_value = None
         assert self._validator(client).validate_pr(7378) is False
 
-    def test_leave_open_label_skips_all_processing(self):
+    def test_leave_open_label_prevents_closure_but_still_processes(self):
         raw_pr = make_fake_raw_pr(
             title="Not a valid title",
             body=NO_CHECKLIST_BODY,
@@ -1260,11 +1260,10 @@ class TestValidatePR:
         validator = self._validator(client)
 
         assert validator.validate_pr(7378) is True
-        client.add_labels.assert_not_called()
-        client.remove_labels.assert_not_called()
-        client.post_comment.assert_not_called()
         client.close_pr.assert_not_called()
-        client.count_unresolved_review_threads.assert_not_called()
+        client.add_labels.assert_any_call(7378, LABEL_PR_CHECK_BLOCKED)
+        assert REVIEW_COMMENT_PARTIAL in client.post_comment.call_args[0][1]
+        client.count_unresolved_review_threads.assert_called_once_with(7378)
 
 
 class TestComment:

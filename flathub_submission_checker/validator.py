@@ -238,16 +238,12 @@ class PRValidator:
         ctx = PRContext.from_pull_request(raw_pr)
         appid = get_appid_from_pr_title(ctx.title)
 
-        if ctx.has_any_label(LABEL_LEAVE_OPEN):
-            logger.info("PR #%s has leave-open label, skipping", ctx.number)
-            return True
-
         checklist = parse_checklist(ctx.body)
 
         spam_ret, spam_comment = is_considered_spam(
             checklist, ctx.files, ctx.body, ctx.labels, appid, ctx.created_at
         )
-        if spam_ret:
+        if spam_ret and not ctx.has_any_label(LABEL_LEAVE_OPEN):
             if ctx.created_at is None or ctx.created_at < self.AUTO_CLOSE_CUTOFF_DATE:
                 logger.info(
                     "PR #%s is not eligible for auto-close; skipping spam action",
