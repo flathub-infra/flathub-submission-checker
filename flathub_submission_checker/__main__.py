@@ -19,10 +19,6 @@ def _build_client(gh_token: str, gh_repo: str) -> PyGithubClient | None:
         return None
 
 
-def _is_review_command(text: str) -> bool:
-    return text.strip().lower() == "/review"
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Flathub submission checker",
@@ -61,16 +57,6 @@ def main() -> int:
         return 1
 
     validator = PRValidator(client, gh_repo)
-
-    pr_number = os.environ.get("PR_NUMBER")
-    is_review_comment = _is_review_command(os.environ.get("COMMENT_BODY", ""))
-
-    if pr_number and is_review_comment:
-        try:
-            return 0 if validator.run_single(int(pr_number)) else 1
-        except ValueError as err:
-            logger.error("Invalid PR_NUMBER: %s", err)
-            return 1
 
     return 0 if validator.run() else 1
 

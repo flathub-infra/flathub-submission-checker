@@ -298,14 +298,3 @@ class PRValidator:
             logger.info("Validating PR #%s", pr_num)
             ok = self.validate_pr(pr_num) and ok
         return ok
-
-    def run_single(self, pr_num: int) -> bool:
-        raw_pr = self.client.fetch_pull_request(pr_num)
-        if raw_pr is None:
-            logger.info("PR #%s could not be fetched", pr_num)
-            return False
-        ok = True
-        if raw_pr.draft:
-            logger.info("PR #%s is a draft, adding work-in-progress label", pr_num)
-            ok = self.client.add_labels(pr_num, LABEL_WORK_IN_PROGRESS)
-        return self.validate_pr(pr_num) and ok

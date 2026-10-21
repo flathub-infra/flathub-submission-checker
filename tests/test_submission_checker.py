@@ -656,17 +656,6 @@ class TestDateAwareChecklist:
         client.close_pr.assert_not_called()
         client.post_comment.assert_not_called()
 
-        single_client = make_client(
-            fetch_pr=make_fake_raw_pr(
-                body=body,
-                files=files,
-                created_at=created_at,
-            )
-        )
-        assert PRValidator(single_client, "flathub/flathub").run_single(7378) is True
-        single_client.close_pr.assert_not_called()
-        single_client.post_comment.assert_not_called()
-
     def test_missing_creation_date_stays_open(self):
         checklist = parse_checklist(LEGACY_CHECKLIST_BODY)
         assert checklist_matches_template(checklist, None) is True
@@ -1412,14 +1401,3 @@ class TestRun:
         result = self._validator(client).run()
         assert result is True
         assert client.fetch_pull_request.call_count == 2
-
-    def test_run_single_adds_work_in_progress_for_draft(self):
-        raw_pr = make_fake_raw_pr(
-            title="Add com.example.foobar",
-            body=FULL_CHECKLIST_BODY,
-            draft=True,
-            files=["com.example.foobar.json"],
-        )
-        client = make_client(fetch_pr=raw_pr)
-        self._validator(client).run_single(7378)
-        client.add_labels.assert_any_call(7378, LABEL_WORK_IN_PROGRESS)
