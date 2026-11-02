@@ -24,6 +24,7 @@ LABEL_AWAITING_UPSTREAM = "awaiting-upstream"
 LABEL_REVIEWED_WAITING = "reviewed-waiting"
 LABEL_STALE = "Stale"
 LABEL_LEAVE_OPEN = "leave-open"
+LABEL_TOO_NEW = "too-new"
 LABEL_MIGRATE = "migrate-app-id"
 
 

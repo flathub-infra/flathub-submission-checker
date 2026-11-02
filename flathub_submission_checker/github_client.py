@@ -5,7 +5,7 @@ from typing import Protocol, cast
 from github import Auth, Github
 from github.GithubException import GithubException
 
-from flathub_submission_checker.constants import LABEL_STALE
+from flathub_submission_checker.constants import LABEL_STALE, LABEL_TOO_NEW
 from flathub_submission_checker.models import RawPullRequest
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,8 @@ class PyGithubClient:
         try:
             pr = self.repo.get_pull(pr_number)
             existing = {label.name for label in pr.get_labels()}
+            if LABEL_TOO_NEW in existing:
+                return True
             for label in labels:
                 if label not in existing:
                     pr.add_to_labels(label)

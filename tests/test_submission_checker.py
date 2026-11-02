@@ -21,6 +21,7 @@ from flathub_submission_checker.constants import (
     REVIEW_COMMENT_PARTIAL,
     SPAM_CLOSE_COMMENT,
 )
+from flathub_submission_checker.github_client import PyGithubClient
 from flathub_submission_checker.models import PRContext, has_master_commit
 from flathub_submission_checker.parsing import (
     _role_checklist_matches,
@@ -1357,6 +1358,22 @@ class TestComment:
         posted = client.post_comment.call_args[0][1]
         assert f"Diagnostics: {expected_reason}." in posted
         assert posted.index(SPAM_CLOSE_COMMENT) < posted.index("Diagnostics:")
+
+
+class TestLabelApplication:
+    @pytest.mark.parametrize("too_new", [True, False])
+    def test_too_new_prevents_other_labels(self, too_new):
+        pr = MagicMock()
+        pr.get_labels.return_value = [FakeLabel("too-new")] if too_new else []
+        client = PyGithubClient.__new__(PyGithubClient)
+        client.repo = MagicMock()
+        client.repo.get_pull.return_value = pr
+
+        assert client.add_labels(7378, LABEL_AWAITING_REVIEW) is True
+        if too_new:
+            pr.add_to_labels.assert_not_called()
+        else:
+            pr.add_to_labels.assert_called_once_with(LABEL_AWAITING_REVIEW)
 
 
 class TestRun:
