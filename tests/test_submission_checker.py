@@ -408,18 +408,21 @@ class TestChecklistMatchesTemplate:
     @pytest.mark.parametrize(
         ("role_line", "expected"),
         [
-            ("I am the author/developer/upstream contributor to the project.", True),
-            ("I am an author to the project.", True),
+            ("I am the author/developer/upstream contributor of the project.", True),
+            ("I am the author of this project.", True),
+            ("I am the original author of this project.", True),
+            ("I am the original author of this application.", True),
             ("I am a developer to the project.", True),
             ("I am an upstream contributor to the project.", True),
             (
                 "If not, I contacted upstream developers about this submission. Link: https://example.com/1",
                 True,
             ),
-            ("I am a contributor to the project, occasionally.", False),
-            ("I am the developer of the project", False),
-            ("I am the maintainer to the project.", False),
-            ("I am an author to the codebase.", False),
+            ("I am a contributor to the project, occasionally.", True),
+            ("I am the developer of this project", True),
+            ("I am the maintainer of this project.", False),
+            ("I am an author of the codebase.", True),
+            ("I am an user of the project.", False),
         ],
     )
     def test_role_line_variants(self, role_line, expected):

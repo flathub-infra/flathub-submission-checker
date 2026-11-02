@@ -44,13 +44,12 @@ VIDEO_NA_RE = re.compile(r"\b(n/?a|no\s+video(?:\s+available)?)\b", re.IGNORECAS
 
 ROLE_CHECKLIST_RE = re.compile(
     r"I am (?:an?|the)\s+"
-    r"(?:\(.*?\)\s+)?"
+    r".*?"
     r"(?:"
-    r"author(?:\s*/\s*developer(?:\s*/\s*upstream\s+contributor)?)?|"
-    r"developer(?:\s*/\s*upstream\s+contributor)?|"
-    r"upstream\s+contributor"
+    r"author|"
+    r"developer|"
+    r"contributor"
     r")"
-    r"\s+to\s+the\s+project\b"
     r"|"
     r"I contacted upstream developers about this submission\b",
     re.IGNORECASE,
