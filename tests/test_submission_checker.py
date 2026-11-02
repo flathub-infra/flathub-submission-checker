@@ -422,7 +422,7 @@ class TestChecklistMatchesTemplate:
             ),
             ("I am a contributor to the project, occasionally.", True),
             ("I am the developer of the project", True),
-            ("I am the maintainer to the project.", False),
+            ("I am the maintainer to the project.", True),
             ("I am an author to the codebase.", True),
             ("I am the original author of this application.", True),
         ],

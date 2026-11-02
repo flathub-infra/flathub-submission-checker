@@ -50,9 +50,9 @@ ROLE_CHECKLIST_RE = re.compile(
     r"I am (?:an?|the)\s+"
     r"(?:\([^)]*\)\s+)?"
     r"(?:[\w-]+\s+)*?"
-    r"(?:author|developer|contributor)"
-    r"(?:\s*/\s*(?:[\w-]+\s+)*?(?:author|developer|contributor))*"
-    r"\s+(?:to|of)\s+(?:the|this)\s+"
+    r"(?:author|developer|contributor|maintainer)"
+    r"(?:\s*/\s*(?:[\w-]+\s+)*?(?:author|developer|contributor|maintainer))*"
+    r"\s+(?:to|of|in)\s+(?:the|this)\s+"
     r"(?:project|application|app|codebase)\b"
     r"|"
     r"I contacted upstream developers about this submission\b",

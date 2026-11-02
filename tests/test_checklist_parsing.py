@@ -128,6 +128,8 @@ class TestWrappedChecklistTemplate:
         "I am an upstream contributor of this project.",
         "I am the author/developer/upstream contributor to the project.",
         "I am a contributor to the project, occasionally.",
+        "I am a maintainer in the project.",
+        "I am the maintainer of this project.",
         "I am an author to the codebase.",
         "If not, I contacted upstream developers about this submission.",
     ],
@@ -139,7 +141,6 @@ def test_natural_role_wording_is_accepted(role_line):
 @pytest.mark.parametrize(
     "role_line",
     [
-        "I am the maintainer of this project.",
         "I am a user of this project.",
     ],
 )
