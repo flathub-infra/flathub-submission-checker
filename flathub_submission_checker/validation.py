@@ -19,13 +19,14 @@ from flathub_submission_checker.constants import (
     SUBMISSION_URL,
     TOPLEVEL_MANIFEST_RE,
     VERIFICATION_URL,
+    VIDEO_CHECKLIST_ITEM,
 )
 from flathub_submission_checker.models import PRContext, ValidationResult
 from flathub_submission_checker.parsing import (
-    checklist_fully_checked,
-    checklist_matches_template,
     count_unchecked_relevant_items,
     has_missing_video,
+    missing_checklist_items,
+    unchecked_checklist_items,
 )
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,30 @@ def get_domain(appid: str) -> str | None:
     return domain
 
 
+def _quote_items(items: list[str]) -> str:
+    return ", ".join(f'"{item}"' for item in items)
+
+
+def _checklist_diagnostics(
+    checklist: list[tuple[bool, str]], created_at: datetime | None
+) -> list[str]:
+    missing_items = missing_checklist_items(checklist, created_at)
+    unchecked_items = unchecked_checklist_items(checklist, created_at)
+
+    reasons: list[str] = []
+    if missing_items:
+        reasons.append(
+            f"- Add the missing [checklists]({PR_TEMPLATE_URL}) item(s): "
+            f"{_quote_items(missing_items)}"
+        )
+    if unchecked_items:
+        reasons.append(
+            f"- Complete and check the [checklists]({PR_TEMPLATE_URL}) item(s): "
+            f"{_quote_items(unchecked_items)}"
+        )
+    return reasons
+
+
 def is_considered_spam(
     checklist: list[tuple[bool, str]],
     files: list[str],
@@ -100,38 +125,52 @@ def is_considered_spam(
     labels: set[str],
     appid: str | None,
     created_at: datetime | None,
-) -> tuple[bool, str]:
+) -> tuple[bool, list[str]]:
+    diagnostics: list[str] = []
+
     if files and all("/" in f for f in files):
         logger.info(
             "All files are nested in subdirectories, flagging as spam: %s", files
         )
-        return (True, "Files not in toplevel")
+        diagnostics.append(
+            "Move the Flatpak manifest from its subdirectory to the top level "
+            "of the repository."
+        )
 
-    if not checklist_matches_template(checklist, created_at):
+    missing_items = missing_checklist_items(checklist, created_at)
+    if missing_items:
         logger.info("Checklist missing or altered, flagging as spam")
-        return (True, "Checklist(s) not completed or missing")
+        diagnostics.append(
+            f"Add the missing checklist item(s): {_quote_items(missing_items)}."
+        )
 
-    if (
+    video_missing = (
         LABEL_MIGRATE not in labels
         and has_missing_video(body)
         and not is_appid_addon(appid)
-    ):
+    )
+    if video_missing and VIDEO_CHECKLIST_ITEM not in missing_items:
         logger.info(
             "Video checklist item missing, unchecked, or has no link, flagging as spam"
         )
-        return (True, "Video checklist requirement not met")
+        diagnostics.append(
+            "Check the video checklist item and attach a video showing the "
+            "application running as a Flatpak on Linux."
+        )
 
     unchecked_count = count_unchecked_relevant_items(checklist, created_at)
-    result = unchecked_count > MAX_UNCHECKED_ITEMS_ALLOWED
     logger.info(
         "Unchecked checklist count is %s > %s",
         unchecked_count,
         MAX_UNCHECKED_ITEMS_ALLOWED,
     )
-    if result:
-        return (result, "Checklist(s) not completed or missing")
+    if unchecked_count > MAX_UNCHECKED_ITEMS_ALLOWED:
+        diagnostics.append(
+            "Complete and check the unchecked checklist item(s): "
+            f"{_quote_items(unchecked_checklist_items(checklist, created_at))}."
+        )
 
-    return (False, "")
+    return (bool(diagnostics), diagnostics)
 
 
 def validate_pr_structure(
@@ -146,20 +185,16 @@ def validate_pr_structure(
         ),
         (
             not any(FLATHUB_JSON_RE.match(f) for f in ctx.files),
-            "- flathub.json file is at toplevel",
+            "- Move the flathub.json file to the top level of the repository",
         ),
         (
             any(TOPLEVEL_MANIFEST_RE.match(f) for f in ctx.files),
-            "- Flatpak manifest is at toplevel",
-        ),
-        (
-            checklist_fully_checked(checklist, ctx.created_at),
-            f"- All [checklists]({PR_TEMPLATE_URL}) "
-            "are present in PR body and are completed",
+            "- Add or move the Flatpak manifest to the top level of the repository",
         ),
     ]
 
     reasons = [message for passed, message in checks if not passed]
+    reasons.extend(_checklist_diagnostics(checklist, ctx.created_at))
     domain = get_domain(appid) if appid else None
 
     return ValidationResult(is_valid=not reasons, reasons=reasons, domain=domain)

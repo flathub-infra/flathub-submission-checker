@@ -1,16 +1,44 @@
 import logging
 from datetime import datetime
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 from github import Auth, Github
 from github.GithubException import GithubException
 
-from flathub_submission_checker.constants import LABEL_STALE, LABEL_TOO_NEW
+from flathub_submission_checker.constants import (
+    BOT_LOGINS,
+    LABEL_STALE,
+    LABEL_TOO_NEW,
+)
 from flathub_submission_checker.models import RawPullRequest
 
 logger = logging.getLogger(__name__)
 
 GITHUB_CALL_EXCEPTIONS = GithubException
+
+ISSUE_EVENTS_PER_PAGE = 100
+BOT_ACTOR_TYPE = "bot"
+HUMAN_ACTOR_TYPE = "user"
+BOT_LOGIN_SUFFIX = "[bot]"
+
+
+def is_bot_actor(actor: dict[str, Any] | None) -> bool | None:
+    if not actor:
+        return None
+    login = actor.get("login")
+    if not isinstance(login, str) or not login:
+        return None
+    if login in BOT_LOGINS or login.endswith(BOT_LOGIN_SUFFIX):
+        return True
+    actor_type = actor.get("type")
+    if not isinstance(actor_type, str) or not actor_type:
+        return None
+    actor_type = actor_type.lower()
+    if actor_type == BOT_ACTOR_TYPE:
+        return True
+    if actor_type == HUMAN_ACTOR_TYPE:
+        return False
+    return None
 
 
 class GitHubClient(Protocol):
@@ -28,6 +56,7 @@ class GitHubClient(Protocol):
     ) -> list[int] | None: ...
     def fetch_pull_request(self, pr_number: int) -> RawPullRequest | None: ...
     def count_unresolved_review_threads(self, pr_number: int) -> int | None: ...
+    def has_human_reopened(self, pr_number: int) -> bool | None: ...
 
 
 class PyGithubClient:
@@ -170,3 +199,57 @@ class PyGithubClient:
                 err,
             )
             return None
+
+    def has_human_reopened(self, pr_number: int) -> bool | None:
+        unknown_actor = False
+        page = 1
+        try:
+            while True:
+                _, events = self.gh.requester.requestJsonAndCheck(
+                    "GET",
+                    f"/repos/{self.owner_login}/{self.repo_name}"
+                    f"/issues/{pr_number}/events",
+                    parameters={
+                        "per_page": ISSUE_EVENTS_PER_PAGE,
+                        "page": page,
+                    },
+                )
+                if not isinstance(events, list):
+                    logger.error(
+                        "Unexpected issue-events response on PR %s: %r",
+                        pr_number,
+                        events,
+                    )
+                    return None
+                for event in events:
+                    if not isinstance(event, dict):
+                        unknown_actor = True
+                        continue
+                    if event.get("event") != "reopened":
+                        continue
+                    actor = event.get("actor")
+                    actor_dict = actor if isinstance(actor, dict) else None
+                    is_bot = is_bot_actor(actor_dict)
+                    if is_bot is False:
+                        logger.info(
+                            "PR #%s was reopened by a human (%s)",
+                            pr_number,
+                            actor_dict.get("login") if actor_dict else None,
+                        )
+                        return True
+                    if is_bot is None:
+                        unknown_actor = True
+                if len(events) < ISSUE_EVENTS_PER_PAGE:
+                    break
+                page += 1
+        except GITHUB_CALL_EXCEPTIONS as err:
+            logger.error("Failed to fetch issue events for PR %s: %s", pr_number, err)
+            return None
+
+        if unknown_actor:
+            logger.info(
+                "PR #%s has a reopen event from an unknown actor; failing safe",
+                pr_number,
+            )
+            return None
+        return False

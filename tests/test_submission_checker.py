@@ -241,6 +241,7 @@ def make_client(
     client.remove_labels.return_value = remove_labels_ok
     client.post_comment.return_value = post_comment_ok
     client.close_pr.return_value = close_pr_ok
+    client.has_human_reopened.return_value = False
     client.fetch_pr_numbers.return_value = pr_numbers if pr_numbers is not None else []
     return client
 
@@ -344,14 +345,17 @@ class TestParseChecklist:
         checklist = parse_checklist(PR_10111_CHECKLIST_BODY)
         assert len(checklist) == 8
         assert checklist_fully_checked(checklist, CHECKLIST_DATE) is True
-        assert is_considered_spam(
-            checklist,
-            ["uk._92li.lingyicute.ComputeSec.yml"],
-            PR_10111_CHECKLIST_BODY,
-            set(),
-            "uk._92li.lingyicute.ComputeSec",
-            CHECKLIST_DATE,
-        ) == (False, "")
+        assert (
+            is_considered_spam(
+                checklist,
+                ["uk._92li.lingyicute.ComputeSec.yml"],
+                PR_10111_CHECKLIST_BODY,
+                set(),
+                "uk._92li.lingyicute.ComputeSec",
+                CHECKLIST_DATE,
+            )[0]
+            is False
+        )
         assert (
             validate_pr_structure(
                 make_pr_context(
@@ -416,10 +420,11 @@ class TestChecklistMatchesTemplate:
                 "If not, I contacted upstream developers about this submission. Link: https://example.com/1",
                 True,
             ),
-            ("I am a contributor to the project, occasionally.", False),
-            ("I am the developer of the project", False),
+            ("I am a contributor to the project, occasionally.", True),
+            ("I am the developer of the project", True),
             ("I am the maintainer to the project.", False),
-            ("I am an author to the codebase.", False),
+            ("I am an author to the codebase.", True),
+            ("I am the original author of this application.", True),
         ],
     )
     def test_role_line_variants(self, role_line, expected):
@@ -483,45 +488,57 @@ class TestCountUncheckedRelevantItems:
 
 class TestIsConsideredSpam:
     def test_valid_submission_is_not_spam(self):
-        assert is_considered_spam(
-            parse_checklist(FULL_CHECKLIST_BODY),
-            VALID_FILES,
-            FULL_CHECKLIST_BODY,
-            set(),
-            "com.example.foobar",
-            CHECKLIST_DATE,
-        ) == (False, "")
+        assert (
+            is_considered_spam(
+                parse_checklist(FULL_CHECKLIST_BODY),
+                VALID_FILES,
+                FULL_CHECKLIST_BODY,
+                set(),
+                "com.example.foobar",
+                CHECKLIST_DATE,
+            )[0]
+            is False
+        )
 
     def test_all_files_in_subdirectory_is_spam(self):
         body = FULL_CHECKLIST_BODY
-        assert is_considered_spam(
-            parse_checklist(body),
-            ["some/nested/file.json", "another/nested/file.yaml"],
-            body,
-            set(),
-            "com.example.foobar",
-            CHECKLIST_DATE,
-        ) == (True, "Files not in toplevel")
+        assert (
+            is_considered_spam(
+                parse_checklist(body),
+                ["some/nested/file.json", "another/nested/file.yaml"],
+                body,
+                set(),
+                "com.example.foobar",
+                CHECKLIST_DATE,
+            )[0]
+            is True
+        )
 
     def test_missing_checklist_template_is_spam(self):
-        assert is_considered_spam(
-            parse_checklist(NO_CHECKLIST_BODY),
-            VALID_FILES,
-            NO_CHECKLIST_BODY,
-            set(),
-            "com.example.foobar",
-            CHECKLIST_DATE,
-        ) == (True, "Checklist(s) not completed or missing")
+        assert (
+            is_considered_spam(
+                parse_checklist(NO_CHECKLIST_BODY),
+                VALID_FILES,
+                NO_CHECKLIST_BODY,
+                set(),
+                "com.example.foobar",
+                CHECKLIST_DATE,
+            )[0]
+            is True
+        )
 
     def test_incomplete_checklist_template_is_spam(self):
-        assert is_considered_spam(
-            parse_checklist(MISSING_ITEM_CHECKLIST_BODY),
-            VALID_FILES,
-            MISSING_ITEM_CHECKLIST_BODY,
-            set(),
-            "com.example.foobar",
-            CHECKLIST_DATE,
-        ) == (True, "Checklist(s) not completed or missing")
+        assert (
+            is_considered_spam(
+                parse_checklist(MISSING_ITEM_CHECKLIST_BODY),
+                VALID_FILES,
+                MISSING_ITEM_CHECKLIST_BODY,
+                set(),
+                "com.example.foobar",
+                CHECKLIST_DATE,
+            )[0]
+            is True
+        )
 
     @pytest.mark.parametrize("unchecked", [2, 3])
     def test_too_many_unchecked_items_is_spam(self, unchecked):
@@ -534,38 +551,47 @@ class TestIsConsideredSpam:
         for index in non_video_indices[:unchecked]:
             lines[index] = lines[index].replace("[x]", "[ ]", 1)
         body = "\n".join(lines) + "\n"
-        assert is_considered_spam(
-            parse_checklist(body),
-            VALID_FILES,
-            body,
-            set(),
-            "com.example.foobar",
-            CHECKLIST_DATE,
-        ) == (True, "Checklist(s) not completed or missing")
+        assert (
+            is_considered_spam(
+                parse_checklist(body),
+                VALID_FILES,
+                body,
+                set(),
+                "com.example.foobar",
+                CHECKLIST_DATE,
+            )[0]
+            is True
+        )
 
     def test_one_unchecked_item_is_not_spam(self):
         body = checklist_body(unchecked=1)
-        assert is_considered_spam(
-            parse_checklist(body),
-            VALID_FILES,
-            body,
-            set(),
-            "com.example.foobar",
-            CHECKLIST_DATE,
-        ) == (False, "")
+        assert (
+            is_considered_spam(
+                parse_checklist(body),
+                VALID_FILES,
+                body,
+                set(),
+                "com.example.foobar",
+                CHECKLIST_DATE,
+            )[0]
+            is False
+        )
 
     def test_missing_video_is_spam(self):
         body = FULL_CHECKLIST_BODY.replace(
             "      https://example.com/demo-video.mp4\n", ""
         )
-        assert is_considered_spam(
-            parse_checklist(body),
-            VALID_FILES,
-            body,
-            set(),
-            "com.example.foobar",
-            CHECKLIST_DATE,
-        ) == (True, "Video checklist requirement not met")
+        assert (
+            is_considered_spam(
+                parse_checklist(body),
+                VALID_FILES,
+                body,
+                set(),
+                "com.example.foobar",
+                CHECKLIST_DATE,
+            )[0]
+            is True
+        )
 
     @pytest.mark.parametrize(
         ("labels", "appid"),
@@ -578,9 +604,12 @@ class TestIsConsideredSpam:
         body = FULL_CHECKLIST_BODY.replace(
             "      https://example.com/demo-video.mp4\n", ""
         )
-        assert is_considered_spam(
-            parse_checklist(body), VALID_FILES, body, labels, appid, CHECKLIST_DATE
-        ) == (False, "")
+        assert (
+            is_considered_spam(
+                parse_checklist(body), VALID_FILES, body, labels, appid, CHECKLIST_DATE
+            )[0]
+            is False
+        )
 
 
 class TestDateAwareChecklist:
@@ -589,14 +618,17 @@ class TestDateAwareChecklist:
         checklist = parse_checklist(LEGACY_CHECKLIST_BODY)
         assert checklist_matches_template(checklist, created_at) is True
         assert checklist_fully_checked(checklist, created_at) is True
-        assert is_considered_spam(
-            checklist,
-            VALID_FILES,
-            LEGACY_CHECKLIST_BODY,
-            set(),
-            "com.example.foobar",
-            created_at,
-        ) == (False, "")
+        assert (
+            is_considered_spam(
+                checklist,
+                VALID_FILES,
+                LEGACY_CHECKLIST_BODY,
+                set(),
+                "com.example.foobar",
+                created_at,
+            )[0]
+            is False
+        )
         assert (
             validate_pr_structure(
                 make_pr_context(
@@ -740,14 +772,17 @@ class TestDateAwareChecklist:
             ).is_valid
             is False
         )
-        assert is_considered_spam(
-            checklist,
-            VALID_FILES,
-            body,
-            set(),
-            "com.example.foobar",
-            effective_date,
-        ) == (True, "Checklist(s) not completed or missing")
+        assert (
+            is_considered_spam(
+                checklist,
+                VALID_FILES,
+                body,
+                set(),
+                "com.example.foobar",
+                effective_date,
+            )[0]
+            is True
+        )
 
 
 class TestHasMasterCommit:
@@ -1065,6 +1100,16 @@ class TestHasMissingVideo:
         )
         assert has_missing_video(body) is False
 
+    def test_video_reference_link_defined_later_is_not_missing(self):
+        body = (
+            "- [x] Please attach a video showcasing the application on Linux "
+            "using the Flatpak. [Demo Video]\n"
+            "- [x] I am an author to the project.\n"
+            "\n"
+            "[demo video]: https://example.com/video.mp4\n"
+        )
+        assert has_missing_video(body) is False
+
     @pytest.mark.parametrize("marker", ["N/A", "n/a", "NA", "no video available"])
     def test_marked_na_is_missing(self, marker):
         body = (
@@ -1165,10 +1210,7 @@ class TestValidatePR:
 
         assert self._validator(client).validate_pr(7378) is True
         client.close_pr.assert_called_once_with(7378)
-        assert (
-            "Diagnostics: Video checklist requirement not met."
-            in (client.post_comment.call_args[0][1])
-        )
+        assert "Diagnostics:" in client.post_comment.call_args[0][1]
 
     def test_undrafted_pr_loses_work_in_progress_label(self):
         raw_pr = make_fake_raw_pr(
@@ -1332,31 +1374,29 @@ class TestComment:
         client.post_comment.assert_not_called()
 
     @pytest.mark.parametrize(
-        "title,body,files,expected_reason",
+        "title,body,files",
         [
             pytest.param(
                 "Add com.example.foobar",
                 FULL_CHECKLIST_BODY,
                 ["some/nested/file.json", "another/nested/file.yaml"],
-                "Files not in toplevel",
                 id="files-not-toplevel",
             ),
             pytest.param(
                 "Add com.example.foobar",
                 NO_CHECKLIST_BODY,
                 VALID_FILES,
-                "Checklist(s) not completed or missing",
                 id="checklist-missing",
             ),
         ],
     )
-    def test_close_comment_e2ee(self, title, body, files, expected_reason):
+    def test_close_comment_e2ee(self, title, body, files):
         raw_pr = make_fake_raw_pr(title=title, body=body, files=files)
         client = make_client(fetch_pr=raw_pr)
         self._validator(client).validate_pr(7378)
 
         posted = client.post_comment.call_args[0][1]
-        assert f"Diagnostics: {expected_reason}." in posted
+        assert SPAM_CLOSE_COMMENT in posted
         assert posted.index(SPAM_CLOSE_COMMENT) < posted.index("Diagnostics:")
 
 

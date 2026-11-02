@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime
 
 from flathub_submission_checker.constants import (
@@ -7,6 +8,8 @@ from flathub_submission_checker.constants import (
     CHECKLIST_ITEMS,
     CHECKLIST_LINE_RE,
     FLATHUB_DOCS_BASE_URL,
+    MARKDOWN_LINK_DEFINITION_RE,
+    MARKDOWN_LINK_LABEL_RE,
     ROLE_CHECKLIST_RE,
     VIDEO_CHECKLIST_ITEM,
     VIDEO_LINK_RE,
@@ -38,10 +41,45 @@ def get_appid_from_pr_title(title: str) -> str | None:
 
 
 def parse_checklist(body: str) -> list[tuple[bool, str]]:
-    checklist = [
-        (mark.lower() == "x", text.strip())
-        for mark, text in CHECKLIST_LINE_RE.findall(body)
-    ]
+    checklist: list[tuple[bool, str]] = []
+    pending: tuple[bool, str, int] | None = None
+    continuation: list[str] = []
+
+    def flush() -> None:
+        nonlocal pending, continuation
+        if pending is None:
+            return
+        checked, text, _ = pending
+        if continuation:
+            text = " ".join([text, *continuation])
+        checklist.append((checked, text))
+        pending = None
+        continuation = []
+
+    for line in body.splitlines():
+        matched = CHECKLIST_LINE_RE.match(line)
+        if matched:
+            flush()
+            pending = (
+                matched.group(1).lower() == "x",
+                matched.group(2).strip(),
+                _indentation_width(line),
+            )
+            continue
+        if (
+            pending is not None
+            and line.strip()
+            and not re.match(
+                r"^[ \t]*(?:#{1,6}(?:\s|$)|>|[-+*](?:\s|$)|"
+                r"\d{1,9}[.)]\s|`{3,}|~{3,}|<)",
+                line,
+            )
+        ):
+            continuation.append(line.strip())
+            continue
+        flush()
+
+    flush()
     logger.info("Found %s checklist line(s)", len(checklist))
 
     unchecked = [text for checked, text in checklist if not checked]
@@ -76,9 +114,14 @@ def _checklist_item_matches(text: str, items: tuple[str, ...]) -> bool:
     ) or _role_checklist_matches(normalized_text)
 
 
-def checklist_matches_template(
+ROLE_CHECKLIST_ITEM_NAME = (
+    "Your role in the project (author, developer, or upstream contributor)"
+)
+
+
+def missing_checklist_items(
     checklist: list[tuple[bool, str]], created_at: datetime | None
-) -> bool:
+) -> list[str]:
     items = _checklist_items_for_date(created_at)
     texts = [_normalize_checklist_text(text) for _, text in checklist]
 
@@ -89,40 +132,64 @@ def checklist_matches_template(
     ]
 
     if not any(_role_checklist_matches(text) for text in texts):
-        missing_items.append("Role item: author/developer/contributor")
+        missing_items.append(ROLE_CHECKLIST_ITEM_NAME)
 
     if missing_items:
         logger.info("Found missing required item(s): %s", missing_items)
-        return False
-    return True
+    return missing_items
 
 
-def checklist_fully_checked(
+def _matching_checklist_item(text: str, items: tuple[str, ...]) -> str | None:
+    normalized_text = _normalize_checklist_text(text)
+    return next(
+        (item for item in items if _normalize_checklist_text(item) in normalized_text),
+        None,
+    )
+
+
+def unchecked_checklist_items(
     checklist: list[tuple[bool, str]], created_at: datetime | None
-) -> bool:
+) -> list[str]:
     items = _checklist_items_for_date(created_at)
-    if not checklist_matches_template(checklist, created_at):
-        return False
-
     not_yet_effective_items = tuple(
         item
         for item, effective_date in CHECKLIST_ITEMS
         if effective_date is not None
         and (created_at is None or effective_date > created_at)
     )
+
+    unchecked_items: list[str] = []
     for checked, text in checklist:
         if checked:
             continue
-        if _checklist_item_matches(text, items):
-            return False
-        normalized_text = _normalize_checklist_text(text)
-        if any(
-            _normalize_checklist_text(item) in normalized_text
-            for item in not_yet_effective_items
-        ):
+        matched_item = _matching_checklist_item(text, items)
+        if matched_item is not None:
+            unchecked_items.append(matched_item)
             continue
+        if _role_checklist_matches(_normalize_checklist_text(text)):
+            unchecked_items.append(ROLE_CHECKLIST_ITEM_NAME)
+            continue
+        if _matching_checklist_item(text, not_yet_effective_items) is not None:
+            continue
+        unchecked_items.append(text)
+
+    if unchecked_items:
+        logger.info("Found unchecked relevant item(s): %s", unchecked_items)
+    return unchecked_items
+
+
+def checklist_matches_template(
+    checklist: list[tuple[bool, str]], created_at: datetime | None
+) -> bool:
+    return not missing_checklist_items(checklist, created_at)
+
+
+def checklist_fully_checked(
+    checklist: list[tuple[bool, str]], created_at: datetime | None
+) -> bool:
+    if not checklist_matches_template(checklist, created_at):
         return False
-    return True
+    return not unchecked_checklist_items(checklist, created_at)
 
 
 def count_unchecked_relevant_items(
@@ -146,31 +213,51 @@ def _indentation_width(line: str) -> int:
     return len(expanded_line) - len(expanded_line.lstrip())
 
 
+def _checklist_item_texts(
+    lines: list[str], index: int, text: str, indent: int
+) -> tuple[str, str]:
+    item_lines = [text]
+    search_lines = [text]
+    for continuation in lines[index + 1 :]:
+        if (
+            CHECKLIST_LINE_RE.match(continuation)
+            and _indentation_width(continuation) <= indent
+        ):
+            break
+        search_lines.append(continuation)
+        if not CHECKLIST_LINE_RE.match(continuation):
+            item_lines.append(continuation)
+    return "\n".join(item_lines), "\n".join(search_lines)
+
+
 def has_missing_video(body: str) -> bool:
     lines = body.splitlines()
+    link_definitions = {
+        _normalize_checklist_text(label): url
+        for label, url in MARKDOWN_LINK_DEFINITION_RE.findall(body)
+    }
+    normalized_video_item = _normalize_checklist_text(VIDEO_CHECKLIST_ITEM)
 
     for i, line in enumerate(lines):
         matched = CHECKLIST_LINE_RE.match(line)
         if not matched:
             continue
-        if _normalize_checklist_text(
-            VIDEO_CHECKLIST_ITEM
-        ) not in _normalize_checklist_text(matched.group(2)):
+        video_indent = _indentation_width(line)
+        item_text, search_text = _checklist_item_texts(
+            lines, i, matched.group(2), video_indent
+        )
+        if normalized_video_item not in _normalize_checklist_text(item_text):
             continue
         if matched.group(1).lower() != "x":
             logger.info("Video checklist item is unchecked")
             return True
 
-        video_indent = _indentation_width(line)
-        continuation_lines = []
-        for continuation in lines[i + 1 :]:
-            if (
-                CHECKLIST_LINE_RE.match(continuation)
-                and _indentation_width(continuation) <= video_indent
-            ):
-                break
-            continuation_lines.append(continuation)
-        search_text = "\n".join([matched.group(2), *continuation_lines])
+        referenced_urls = [
+            link_definitions[key]
+            for label in MARKDOWN_LINK_LABEL_RE.findall(search_text)
+            if (key := _normalize_checklist_text(label)) in link_definitions
+        ]
+        search_text = "\n".join([search_text, *referenced_urls])
 
         for video_link in VIDEO_LINK_RE.finditer(search_text):
             if not video_link.group(0).startswith(f"{FLATHUB_DOCS_BASE_URL}/"):

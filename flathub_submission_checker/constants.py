@@ -41,16 +41,19 @@ CHECKLIST_LINE_RE = re.compile(
 
 VIDEO_LINK_RE = re.compile(r"https?://\S+")
 VIDEO_NA_RE = re.compile(r"\b(n/?a|no\s+video(?:\s+available)?)\b", re.IGNORECASE)
+MARKDOWN_LINK_LABEL_RE = re.compile(r"\[([^\]]+)\]")
+MARKDOWN_LINK_DEFINITION_RE = re.compile(
+    r"^[ \t]{0,3}\[([^\]]+)\]:[ \t]*(\S+)", re.MULTILINE
+)
 
 ROLE_CHECKLIST_RE = re.compile(
     r"I am (?:an?|the)\s+"
-    r"(?:\(.*?\)\s+)?"
-    r"(?:"
-    r"author(?:\s*/\s*developer(?:\s*/\s*upstream\s+contributor)?)?|"
-    r"developer(?:\s*/\s*upstream\s+contributor)?|"
-    r"upstream\s+contributor"
-    r")"
-    r"\s+to\s+the\s+project\b"
+    r"(?:\([^)]*\)\s+)?"
+    r"(?:[\w-]+\s+)*?"
+    r"(?:author|developer|contributor)"
+    r"(?:\s*/\s*(?:[\w-]+\s+)*?(?:author|developer|contributor))*"
+    r"\s+(?:to|of)\s+(?:the|this)\s+"
+    r"(?:project|application|app|codebase)\b"
     r"|"
     r"I contacted upstream developers about this submission\b",
     re.IGNORECASE,

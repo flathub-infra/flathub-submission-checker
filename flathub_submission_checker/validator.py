@@ -229,6 +229,21 @@ class PRValidator:
             return self.client.remove_labels(ctx.number, LABEL_AWAITING_CHANGES) and ok
         return True
 
+    def _can_auto_close(self, ctx: PRContext) -> bool:
+        human_reopened = self.client.has_human_reopened(ctx.number)
+        if human_reopened is None:
+            logger.info(
+                "Could not determine reopen history for PR #%s; skipping auto-close",
+                ctx.number,
+            )
+            return False
+        if human_reopened:
+            logger.info(
+                "PR #%s was reopened by a human; skipping auto-close", ctx.number
+            )
+            return False
+        return True
+
     def validate_pr(self, pr_num: int) -> bool:
         raw_pr = self.client.fetch_pull_request(pr_num)
         if raw_pr is None:
@@ -240,7 +255,7 @@ class PRValidator:
 
         checklist = parse_checklist(ctx.body)
 
-        spam_ret, spam_comment = is_considered_spam(
+        spam_ret, spam_comments = is_considered_spam(
             checklist, ctx.files, ctx.body, ctx.labels, appid, ctx.created_at
         )
         if spam_ret and not ctx.has_any_label(LABEL_LEAVE_OPEN):
@@ -250,10 +265,18 @@ class PRValidator:
                     ctx.number,
                 )
                 return True
-            logger.info("PR #%s considered spam, closing", ctx.number)
-            SPAM_COMMENT = f"{SPAM_CLOSE_COMMENT} Diagnostics: {spam_comment}."
-            ok = self._comment(ctx, SPAM_COMMENT)
-            return self.client.close_pr(ctx.number) and ok
+            if not self._can_auto_close(ctx):
+                logger.info(
+                    "PR #%s is protected from auto-close; continuing validation",
+                    ctx.number,
+                )
+            else:
+                logger.info("PR #%s considered spam, closing", ctx.number)
+                SPAM_COMMENT = (
+                    f"{SPAM_CLOSE_COMMENT} Diagnostics: {' '.join(spam_comments)}"
+                )
+                ok = self._comment(ctx, SPAM_COMMENT)
+                return self.client.close_pr(ctx.number) and ok
 
         ok = True
         if not ctx.is_draft:
