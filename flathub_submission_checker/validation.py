@@ -212,11 +212,13 @@ def build_review_comment(reasons: list[str]) -> str:
 
 def build_domain_comment(domain: str) -> str:
     verif_url = f"https://{domain}/.well-known/org.flathub.VerifiedApps.txt"
+    dns_record = f"_flathub.{domain}"
     verif_comment = (
         f"If you intend to [verify]({VERIFICATION_URL}) "
         "this submission, please "
         "confirm by uploading an empty `org.flathub.VerifiedApps.txt` "
-        f"file to {verif_url}. Otherwise, ignore this"
+        f"file to {verif_url} or by adding the verification token as a "
+        f"TXT record at `{dns_record}`. Otherwise, ignore this"
     )
     return (
         f"{DOMAIN_COMMENT_PARTIAL} {domain}. {verif_comment}. "

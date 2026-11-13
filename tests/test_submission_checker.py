@@ -1102,6 +1102,7 @@ class TestBuildComments:
         assert DOMAIN_COMMENT_PARTIAL in comment
         assert "example.com" in comment
         assert "org.flathub.VerifiedApps.txt" in comment
+        assert "TXT record at `_flathub.example.com`" in comment
 
 
 class TestHasMissingVideo:
