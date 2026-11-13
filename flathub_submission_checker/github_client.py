@@ -1,5 +1,6 @@
 import logging
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, Protocol, cast
 
 from github import Auth, Github
@@ -20,6 +21,103 @@ ISSUE_EVENTS_PER_PAGE = 100
 BOT_ACTOR_TYPE = "bot"
 HUMAN_ACTOR_TYPE = "user"
 BOT_LOGIN_SUFFIX = "[bot]"
+BOT_COMMAND_PREFIX = "bot,"
+
+
+@dataclass(frozen=True)
+class ReviewState:
+    unresolved_threads: int
+    changes_pending: bool
+
+
+def is_bot_command(body: Any) -> bool:
+    if not isinstance(body, str):
+        return False
+    return body.lstrip().lower().startswith(BOT_COMMAND_PREFIX)
+
+
+def parse_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def has_pending_changes(pull_request: dict[str, Any]) -> bool | None:
+    author = pull_request.get("author") or {}
+    author_login = author.get("login")
+    head_oid = pull_request.get("headRefOid")
+    if not isinstance(head_oid, str) or not head_oid:
+        return None
+    comments = (pull_request.get("comments") or {}).get("nodes") or []
+    reviews = (pull_request.get("reviews") or {}).get("nodes") or []
+    if not isinstance(reviews, list) or not isinstance(comments, list):
+        return None
+
+    latest_by_reviewer: dict[str, dict[str, Any]] = {}
+    for review in reviews:
+        if not isinstance(review, dict):
+            return None
+        reviewer = (review.get("author") or {}).get("login")
+        if not isinstance(reviewer, str) or not reviewer:
+            continue
+        if reviewer == author_login or reviewer in BOT_LOGINS:
+            continue
+        if reviewer.endswith(BOT_LOGIN_SUFFIX):
+            continue
+        if "submittedAt" not in review:
+            return None
+        submitted_at = parse_timestamp(review.get("submittedAt"))
+        if submitted_at is None:
+            return None
+        previous = latest_by_reviewer.get(reviewer)
+        if previous is None or submitted_at > previous["submitted_at"]:
+            latest_by_reviewer[reviewer] = {
+                "state": review.get("state"),
+                "submitted_at": submitted_at,
+                "oid": (review.get("commit") or {}).get("oid"),
+            }
+
+    for review in latest_by_reviewer.values():
+        if review["state"] != "CHANGES_REQUESTED":
+            continue
+        if review["oid"] is not None and review["oid"] != head_oid:
+            continue
+        replied = _author_replied_after(comments, author_login, review["submitted_at"])
+        if replied is None:
+            return None
+        if replied:
+            continue
+        return True
+    return False
+
+
+def _author_replied_after(
+    comments: list[dict[str, Any]], author_login: str | None, since: datetime
+) -> bool | None:
+    if not author_login:
+        return False
+    for comment in comments:
+        if not isinstance(comment, dict):
+            return None
+        if (comment.get("author") or {}).get("login") != author_login:
+            continue
+        if "createdAt" not in comment:
+            return None
+        created_at = parse_timestamp(comment.get("createdAt"))
+        if created_at is None:
+            return None
+        if created_at <= since:
+            continue
+        if is_bot_command(comment.get("body")):
+            continue
+        return True
+    return False
 
 
 def is_bot_actor(actor: dict[str, Any] | None) -> bool | None:
@@ -55,7 +153,7 @@ class GitHubClient(Protocol):
         result_limit: int,
     ) -> list[int] | None: ...
     def fetch_pull_request(self, pr_number: int) -> RawPullRequest | None: ...
-    def count_unresolved_review_threads(self, pr_number: int) -> int | None: ...
+    def fetch_review_state(self, pr_number: int) -> ReviewState | None: ...
     def has_human_reopened(self, pr_number: int) -> bool | None: ...
 
 
@@ -160,14 +258,39 @@ class PyGithubClient:
             logger.error("Failed to fetch PR %s: %s", pr_number, err)
             return None
 
-    def count_unresolved_review_threads(self, pr_number: int) -> int | None:
+    def fetch_review_state(self, pr_number: int) -> ReviewState | None:
         query = """
         query($owner: String!, $repo: String!, $number: Int!) {
           repository(owner: $owner, name: $repo) {
             pullRequest(number: $number) {
+              headRefOid
+              author {
+                login
+              }
               reviewThreads(first: 100) {
                 nodes {
                   isResolved
+                }
+              }
+              reviews(states: [CHANGES_REQUESTED, APPROVED, DISMISSED], last: 100) {
+                nodes {
+                  state
+                  submittedAt
+                  author {
+                    login
+                  }
+                  commit {
+                    oid
+                  }
+                }
+              }
+              comments(last: 50) {
+                nodes {
+                  createdAt
+                  body
+                  author {
+                    login
+                  }
                 }
               }
             }
@@ -184,21 +307,35 @@ class PyGithubClient:
                 "POST", "/graphql", input={"query": query, "variables": variables}
             )
         except GITHUB_CALL_EXCEPTIONS as err:
-            logger.error("Failed to fetch review threads for PR %s: %s", pr_number, err)
+            logger.error("Failed to fetch review state for PR %s: %s", pr_number, err)
             return None
 
         try:
-            nodes = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+            pull_request = data["data"]["repository"]["pullRequest"]
+            nodes = pull_request["reviewThreads"]["nodes"]
             count = sum(1 for n in nodes if n["isResolved"] is False)
-            logger.info("PR #%s has unresolved threads: %s", pr_number, count)
-            return count
-        except (KeyError, TypeError) as err:
+            changes_pending = has_pending_changes(pull_request)
+            if changes_pending is None:
+                logger.error("Could not determine change requests on PR %s", pr_number)
+                return None
+        except (KeyError, TypeError, AttributeError) as err:
             logger.error(
-                "Unexpected review-threads response on PR %s: %s",
+                "Unexpected review-state response on PR %s: %s",
                 pr_number,
                 err,
             )
             return None
+
+        logger.info(
+            "PR #%s has unresolved threads: %s, changes pending: %s",
+            pr_number,
+            count,
+            changes_pending,
+        )
+        return ReviewState(
+            unresolved_threads=count,
+            changes_pending=changes_pending,
+        )
 
     def has_human_reopened(self, pr_number: int) -> bool | None:
         unknown_actor = False

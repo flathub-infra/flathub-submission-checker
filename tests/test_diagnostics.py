@@ -12,6 +12,7 @@ from flathub_submission_checker.constants import (
     REVIEW_COMMENT_PARTIAL,
     SPAM_CLOSE_COMMENT,
 )
+from flathub_submission_checker.github_client import ReviewState
 from flathub_submission_checker.models import PRContext
 from flathub_submission_checker.parsing import (
     count_unchecked_relevant_items,
@@ -128,7 +129,9 @@ def make_raw_pr(
 def make_client(fetch_pr: FakeRawPR | None) -> MagicMock:
     client = MagicMock()
     client.fetch_pull_request.return_value = fetch_pr
-    client.count_unresolved_review_threads.return_value = 0
+    client.fetch_review_state.return_value = ReviewState(
+        unresolved_threads=0, changes_pending=False
+    )
     client.add_labels.return_value = True
     client.remove_labels.return_value = True
     client.post_comment.return_value = True

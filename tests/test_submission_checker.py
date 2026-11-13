@@ -1,5 +1,7 @@
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,7 +23,11 @@ from flathub_submission_checker.constants import (
     REVIEW_COMMENT_PARTIAL,
     SPAM_CLOSE_COMMENT,
 )
-from flathub_submission_checker.github_client import PyGithubClient
+from flathub_submission_checker.github_client import (
+    PyGithubClient,
+    ReviewState,
+    has_pending_changes,
+)
 from flathub_submission_checker.models import PRContext, has_master_commit
 from flathub_submission_checker.parsing import (
     _role_checklist_matches,
@@ -228,6 +234,7 @@ def make_fake_raw_pr(
 def make_client(
     fetch_pr=None,
     unresolved_threads: int = 0,
+    changes_pending: bool = False,
     add_labels_ok: bool = True,
     remove_labels_ok: bool = True,
     post_comment_ok: bool = True,
@@ -236,7 +243,10 @@ def make_client(
 ) -> MagicMock:
     client = MagicMock()
     client.fetch_pull_request.return_value = fetch_pr
-    client.count_unresolved_review_threads.return_value = unresolved_threads
+    client.fetch_review_state.return_value = ReviewState(
+        unresolved_threads=unresolved_threads,
+        changes_pending=changes_pending,
+    )
     client.add_labels.return_value = add_labels_ok
     client.remove_labels.return_value = remove_labels_ok
     client.post_comment.return_value = post_comment_ok
@@ -1023,40 +1033,60 @@ class TestShouldMarkAwaitingReview:
 class TestShouldDemoteAndPromote:
     def test_demotes_when_threads_open(self):
         ctx = make_pr_context(labels={LABEL_AWAITING_REVIEW})
-        assert should_demote_to_awaiting_changes(ctx, unresolved_threads=2) is True
+        review = ReviewState(unresolved_threads=2, changes_pending=False)
+        assert should_demote_to_awaiting_changes(ctx, review) is True
+
+    def test_demotes_on_body_only_change_request(self):
+        ctx = make_pr_context(labels={LABEL_AWAITING_REVIEW})
+        review = ReviewState(unresolved_threads=0, changes_pending=True)
+        assert should_demote_to_awaiting_changes(ctx, review) is True
 
     def test_no_demote_without_unresolved_threads(self):
         ctx = make_pr_context(labels={LABEL_AWAITING_REVIEW})
-        assert should_demote_to_awaiting_changes(ctx, unresolved_threads=0) is False
+        review = ReviewState(unresolved_threads=0, changes_pending=False)
+        assert should_demote_to_awaiting_changes(ctx, review) is False
 
     def test_no_demote_when_not_awaiting_review(self):
         ctx = make_pr_context(labels={LABEL_AWAITING_CHANGES})
-        assert should_demote_to_awaiting_changes(ctx, unresolved_threads=3) is False
+        review = ReviewState(unresolved_threads=3, changes_pending=True)
+        assert should_demote_to_awaiting_changes(ctx, review) is False
 
     def test_promotes_when_build_succeeded_and_no_threads(self):
         ctx = make_pr_context(
             labels={LABEL_AWAITING_CHANGES},
             comment_lines=[f"Test build {BUILD_SUCCESS_COMMENT}"],
         )
-        assert should_promote_to_awaiting_review(ctx, unresolved_threads=0) is True
+        review = ReviewState(unresolved_threads=0, changes_pending=False)
+        assert should_promote_to_awaiting_review(ctx, review) is True
 
     def test_no_promote_with_unresolved_threads(self):
         ctx = make_pr_context(
             labels={LABEL_AWAITING_CHANGES},
             comment_lines=[f"Test build {BUILD_SUCCESS_COMMENT}"],
         )
-        assert should_promote_to_awaiting_review(ctx, unresolved_threads=1) is False
+        review = ReviewState(unresolved_threads=1, changes_pending=False)
+        assert should_promote_to_awaiting_review(ctx, review) is False
+
+    def test_no_promote_with_pending_change_request(self):
+        ctx = make_pr_context(
+            labels={LABEL_AWAITING_CHANGES},
+            comment_lines=[f"Test build {BUILD_SUCCESS_COMMENT}"],
+        )
+        review = ReviewState(unresolved_threads=0, changes_pending=True)
+        assert should_promote_to_awaiting_review(ctx, review) is False
 
     def test_no_promote_without_successful_build(self):
         ctx = make_pr_context(labels={LABEL_AWAITING_CHANGES}, comment_lines=[])
-        assert should_promote_to_awaiting_review(ctx, unresolved_threads=0) is False
+        review = ReviewState(unresolved_threads=0, changes_pending=False)
+        assert should_promote_to_awaiting_review(ctx, review) is False
 
     def test_no_promote_when_pr_check_blocked(self):
         ctx = make_pr_context(
             labels={LABEL_AWAITING_CHANGES, LABEL_PR_CHECK_BLOCKED},
             comment_lines=[f"Test build {BUILD_SUCCESS_COMMENT}"],
         )
-        assert should_promote_to_awaiting_review(ctx, unresolved_threads=0) is False
+        review = ReviewState(unresolved_threads=0, changes_pending=False)
+        assert should_promote_to_awaiting_review(ctx, review) is False
 
 
 class TestBuildComments:
@@ -1249,6 +1279,19 @@ class TestValidatePR:
         client.add_labels.assert_any_call(7378, LABEL_AWAITING_CHANGES)
         client.remove_labels.assert_any_call(7378, LABEL_AWAITING_REVIEW)
 
+    def test_unlabelled_pr_demotes_in_same_run(self):
+        raw_pr = make_fake_raw_pr(
+            title="Add com.example.foobar",
+            body=FULL_CHECKLIST_BODY,
+            files=["com.example.foobar.json"],
+            labels=[],
+        )
+        client = make_client(fetch_pr=raw_pr, changes_pending=True)
+        self._validator(client).validate_pr(7378)
+
+        client.add_labels.assert_any_call(7378, LABEL_AWAITING_CHANGES)
+        client.remove_labels.assert_any_call(7378, LABEL_AWAITING_REVIEW)
+
     def test_review_comment_not_duplicated(self):
         raw_pr = make_fake_raw_pr(
             title="Not a valid title",
@@ -1271,14 +1314,14 @@ class TestValidatePR:
         validator = self._validator(make_client(fetch_pr=None))
         assert validator.validate_pr(9999) is False
 
-    def test_false_when_unresolved_threads_call_fails(self):
+    def test_false_when_review_state_call_fails(self):
         raw_pr = make_fake_raw_pr(
             title="Add com.example.foobar",
             body=FULL_CHECKLIST_BODY,
             files=["com.example.foobar.json"],
         )
         client = make_client(fetch_pr=raw_pr)
-        client.count_unresolved_review_threads.return_value = None
+        client.fetch_review_state.return_value = None
         assert self._validator(client).validate_pr(7378) is False
 
     def test_leave_open_label_prevents_closure_but_still_processes(self):
@@ -1295,7 +1338,7 @@ class TestValidatePR:
         client.close_pr.assert_not_called()
         client.add_labels.assert_any_call(7378, LABEL_PR_CHECK_BLOCKED)
         assert REVIEW_COMMENT_PARTIAL in client.post_comment.call_args[0][1]
-        client.count_unresolved_review_threads.assert_called_once_with(7378)
+        client.fetch_review_state.assert_called_once_with(7378)
 
 
 class TestComment:
@@ -1450,7 +1493,9 @@ class TestRun:
         client = MagicMock()
         client.fetch_pr_numbers.side_effect = [[7402, 7405], []]
         client.fetch_pull_request.side_effect = [raw_pr_a, raw_pr_b]
-        client.count_unresolved_review_threads.return_value = 0
+        client.fetch_review_state.return_value = ReviewState(
+            unresolved_threads=0, changes_pending=False
+        )
         client.add_labels.return_value = True
         client.remove_labels.return_value = True
         client.post_comment.return_value = True
@@ -1458,3 +1503,250 @@ class TestRun:
         result = self._validator(client).run()
         assert result is True
         assert client.fetch_pull_request.call_count == 2
+
+
+HEAD_OID = "aaa111"
+OTHER_OID = "bbb222"
+REVIEW_TIME = "2026-11-11T20:04:38Z"
+
+
+def make_review_payload(
+    reviews: Iterable[dict[str, Any]] = (),
+    comments: Iterable[dict[str, Any]] = (),
+    author_login: str = "submitter",
+    head_oid: str | None = HEAD_OID,
+) -> dict[str, Any]:
+    return {
+        "headRefOid": head_oid,
+        "author": {"login": author_login},
+        "reviews": {"nodes": list(reviews)},
+        "comments": {"nodes": list(comments)},
+    }
+
+
+def make_review_node(
+    login: str = "reviewer",
+    state: str = "CHANGES_REQUESTED",
+    submitted_at: str = REVIEW_TIME,
+    oid: str | None = HEAD_OID,
+) -> dict[str, Any]:
+    return {
+        "state": state,
+        "submittedAt": submitted_at,
+        "author": {"login": login},
+        "commit": {"oid": oid} if oid else None,
+    }
+
+
+def make_comment_node(
+    login: str = "submitter",
+    created_at: str = "2026-11-11T20:50:56Z",
+    body: str = "ok",
+) -> dict[str, Any]:
+    return {"createdAt": created_at, "body": body, "author": {"login": login}}
+
+
+class TestHasPendingChanges:
+    def test_body_only_change_request_is_pending(self):
+        payload = make_review_payload(reviews=[make_review_node()])
+        assert has_pending_changes(payload) is True
+
+    def test_no_reviews_is_not_pending(self):
+        assert has_pending_changes(make_review_payload()) is False
+
+    def test_approval_clears_pending(self):
+        payload = make_review_payload(
+            reviews=[make_review_node(state="APPROVED")],
+        )
+        assert has_pending_changes(payload) is False
+
+    def test_later_approval_supersedes_change_request(self):
+        payload = make_review_payload(
+            reviews=[
+                make_review_node(),
+                make_review_node(state="APPROVED", submitted_at="2026-11-12T09:00:00Z"),
+            ],
+        )
+        assert has_pending_changes(payload) is False
+
+    def test_later_change_request_supersedes_approval(self):
+        payload = make_review_payload(
+            reviews=[
+                make_review_node(state="APPROVED", submitted_at="2026-11-10T09:00:00Z"),
+                make_review_node(),
+            ],
+        )
+        assert has_pending_changes(payload) is True
+
+    def test_push_after_review_clears_pending(self):
+        payload = make_review_payload(
+            reviews=[make_review_node(oid=OTHER_OID)],
+        )
+        assert has_pending_changes(payload) is False
+
+    def test_author_reply_after_review_clears_pending(self):
+        payload = make_review_payload(
+            reviews=[make_review_node()],
+            comments=[make_comment_node(body="Because upstream needs it.")],
+        )
+        assert has_pending_changes(payload) is False
+
+    def test_author_reply_before_review_does_not_clear(self):
+        payload = make_review_payload(
+            reviews=[make_review_node()],
+            comments=[make_comment_node(created_at="2026-11-11T19:00:00Z")],
+        )
+        assert has_pending_changes(payload) is True
+
+    def test_bot_command_does_not_clear_pending(self):
+        payload = make_review_payload(
+            reviews=[make_review_node()],
+            comments=[make_comment_node(body="bot, build")],
+        )
+        assert has_pending_changes(payload) is True
+
+    def test_prefixed_bot_command_does_not_clear_pending(self):
+        payload = make_review_payload(
+            reviews=[make_review_node()],
+            comments=[make_comment_node(body="  Bot, Build")],
+        )
+        assert has_pending_changes(payload) is True
+
+    def test_other_user_reply_does_not_clear_pending(self):
+        payload = make_review_payload(
+            reviews=[make_review_node()],
+            comments=[make_comment_node(login="someone-else")],
+        )
+        assert has_pending_changes(payload) is True
+
+    def test_reviewer_own_review_does_not_count_for_author(self):
+        payload = make_review_payload(
+            reviews=[make_review_node(login="submitter")],
+        )
+        assert has_pending_changes(payload) is False
+
+    def test_bot_reviews_ignored(self):
+        payload = make_review_payload(
+            reviews=[make_review_node(login="flathubbot")],
+        )
+        assert has_pending_changes(payload) is False
+
+    def test_one_pending_reviewer_among_approvals(self):
+        payload = make_review_payload(
+            reviews=[
+                make_review_node(login="approver", state="APPROVED"),
+                make_review_node(login="blocker"),
+            ],
+        )
+        assert has_pending_changes(payload) is True
+
+    def test_deleted_comment_author_does_not_clear(self):
+        payload = make_review_payload(
+            reviews=[make_review_node()],
+            comments=[
+                {"createdAt": "2026-11-11T20:50:56Z", "body": "ok", "author": None}
+            ],
+        )
+        assert has_pending_changes(payload) is True
+
+    def test_review_without_commit_is_still_pending(self):
+        payload = make_review_payload(
+            reviews=[make_review_node(oid=None)],
+        )
+        assert has_pending_changes(payload) is True
+
+    def test_malformed_review_timestamp_fails_safe(self):
+        payload = make_review_payload(
+            reviews=[make_review_node(submitted_at="not-a-date")],
+        )
+        assert has_pending_changes(payload) is None
+
+    def test_naive_timestamp_does_not_raise(self):
+        payload = make_review_payload(
+            reviews=[make_review_node(submitted_at="2026-11-11")],
+        )
+        assert has_pending_changes(payload) is True
+
+    def test_non_dict_review_fails_safe(self):
+        payload = make_review_payload()
+        payload["reviews"]["nodes"] = ["junk"]
+        assert has_pending_changes(payload) is None
+
+    def test_missing_head_oid_fails_safe(self):
+        payload = make_review_payload(reviews=[make_review_node()], head_oid=None)
+        assert has_pending_changes(payload) is None
+
+    def test_non_dict_comment_fails_safe(self):
+        payload = make_review_payload(reviews=[make_review_node()])
+        payload["comments"]["nodes"] = ["junk"]
+        assert has_pending_changes(payload) is None
+
+    def test_comment_missing_created_at_fails_safe(self):
+        payload = make_review_payload(
+            reviews=[make_review_node()],
+            comments=[{"body": "reply", "author": {"login": "submitter"}}],
+        )
+        assert has_pending_changes(payload) is None
+
+    def test_dismissed_change_request_clears_pending(self):
+        payload = make_review_payload(
+            reviews=[
+                make_review_node(),
+                make_review_node(
+                    state="DISMISSED", submitted_at="2026-11-12T09:00:00Z"
+                ),
+            ],
+        )
+        assert has_pending_changes(payload) is False
+
+    def test_timestamp_order_wins_over_list_order(self):
+        payload = make_review_payload(
+            reviews=[
+                make_review_node(state="APPROVED", submitted_at="2026-11-12T09:00:00Z"),
+                make_review_node(submitted_at="2026-11-11T20:04:38Z"),
+            ],
+        )
+        assert has_pending_changes(payload) is False
+
+    def test_bot_suffix_reviews_ignored(self):
+        payload = make_review_payload(
+            reviews=[make_review_node(login="some-app[bot]")],
+        )
+        assert has_pending_changes(payload) is False
+
+
+def make_graphql_client(payload: dict[str, Any]) -> PyGithubClient:
+    client = PyGithubClient.__new__(PyGithubClient)
+    client.owner_login = "flathub"
+    client.repo_name = "flathub"
+    gh = MagicMock()
+    gh.requester.requestJsonAndCheck.return_value = (None, payload)
+    client.gh = gh
+    return client
+
+
+def review_state_payload(pr_fields: dict[str, Any]) -> dict[str, Any]:
+    return {"data": {"repository": {"pullRequest": pr_fields}}}
+
+
+class TestFetchReviewState:
+    def test_parses_threads_and_pending_changes(self):
+        pr = make_review_payload(reviews=[make_review_node()])
+        pr["reviewThreads"] = {"nodes": [{"isResolved": False}, {"isResolved": True}]}
+        client = make_graphql_client(review_state_payload(pr))
+
+        state = client.fetch_review_state(7378)
+
+        assert state == ReviewState(unresolved_threads=1, changes_pending=True)
+
+    def test_returns_none_when_changes_undeterminable(self):
+        pr = make_review_payload(reviews=[make_review_node()], head_oid=None)
+        pr["reviewThreads"] = {"nodes": []}
+        client = make_graphql_client(review_state_payload(pr))
+
+        assert client.fetch_review_state(7378) is None
+
+    def test_returns_none_on_unexpected_shape(self):
+        client = make_graphql_client({"data": {"repository": {}}})
+
+        assert client.fetch_review_state(7378) is None

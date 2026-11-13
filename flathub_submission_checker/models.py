@@ -139,3 +139,9 @@ class PRContext:
 
     def record_comment(self, body: str) -> None:
         self.comment_lines.extend(body.split("\n"))
+
+    def record_label_added(self, *labels: str) -> None:
+        self.labels.update(labels)
+
+    def record_label_removed(self, *labels: str) -> None:
+        self.labels.difference_update(labels)

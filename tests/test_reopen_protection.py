@@ -15,6 +15,7 @@ from flathub_submission_checker.constants import (
 from flathub_submission_checker.github_client import (
     ISSUE_EVENTS_PER_PAGE,
     PyGithubClient,
+    ReviewState,
     is_bot_actor,
 )
 from flathub_submission_checker.validator import PRValidator
@@ -89,7 +90,9 @@ def make_validator(
     client = MagicMock()
     client.fetch_pull_request.return_value = raw_pr or make_spam_pr()
     client.has_human_reopened.return_value = reopen_result
-    client.count_unresolved_review_threads.return_value = 0
+    client.fetch_review_state.return_value = ReviewState(
+        unresolved_threads=0, changes_pending=False
+    )
     client.add_labels.return_value = True
     client.remove_labels.return_value = True
     client.post_comment.return_value = True
@@ -263,7 +266,7 @@ class TestProtectedReopenValidation:
         assert not any(SPAM_CLOSE_COMMENT in body for body in posted)
         client.add_labels.assert_any_call(7378, LABEL_PR_CHECK_BLOCKED)
         assert any(REVIEW_COMMENT_PARTIAL in body for body in posted)
-        client.count_unresolved_review_threads.assert_called_once_with(7378)
+        client.fetch_review_state.assert_called_once_with(7378)
 
     def test_lookup_failure_skips_close_and_continues_validation(self):
         validator, client = make_validator(None)
@@ -275,7 +278,7 @@ class TestProtectedReopenValidation:
         posted = [c.args[1] for c in client.post_comment.call_args_list]
         assert not any(SPAM_CLOSE_COMMENT in body for body in posted)
         client.add_labels.assert_any_call(7378, LABEL_PR_CHECK_BLOCKED)
-        client.count_unresolved_review_threads.assert_called_once_with(7378)
+        client.fetch_review_state.assert_called_once_with(7378)
 
     def test_no_human_reopen_still_closes(self):
         validator, client = make_validator(False)
@@ -286,7 +289,7 @@ class TestProtectedReopenValidation:
         client.close_pr.assert_called_once_with(7378)
         posted = client.post_comment.call_args.args[1]
         assert SPAM_CLOSE_COMMENT in posted
-        client.count_unresolved_review_threads.assert_not_called()
+        client.fetch_review_state.assert_not_called()
 
     def test_reopen_lookup_skipped_when_not_closure_eligible(self):
         validator, client = make_validator(

@@ -16,7 +16,7 @@ from flathub_submission_checker.constants import (
     REVIEW_COMMENT_PARTIAL,
     SPAM_CLOSE_COMMENT,
 )
-from flathub_submission_checker.github_client import GitHubClient
+from flathub_submission_checker.github_client import GitHubClient, ReviewState
 from flathub_submission_checker.models import PRContext
 from flathub_submission_checker.parsing import get_appid_from_pr_title, parse_checklist
 from flathub_submission_checker.validation import (
@@ -81,9 +81,11 @@ def should_mark_awaiting_review(ctx: PRContext) -> bool:
     return result
 
 
-def should_demote_to_awaiting_changes(ctx: PRContext, unresolved_threads: int) -> bool:
+def should_demote_to_awaiting_changes(ctx: PRContext, review: ReviewState) -> bool:
     has_awaiting_review = ctx.has_any_label(LABEL_AWAITING_REVIEW)
-    result = has_awaiting_review and unresolved_threads > 0
+    result = has_awaiting_review and (
+        review.unresolved_threads > 0 or review.changes_pending
+    )
 
     if not result:
         if not has_awaiting_review:
@@ -92,16 +94,17 @@ def should_demote_to_awaiting_changes(ctx: PRContext, unresolved_threads: int) -
                 "not currently awaiting-review",
                 ctx.number,
             )
-        elif unresolved_threads <= 0:
+        elif review.unresolved_threads <= 0 and not review.changes_pending:
             logger.info(
-                "Not demoting PR #%s to awaiting-changes: no unresolved review threads",
+                "Not demoting PR #%s to awaiting-changes: no unresolved review "
+                "threads or pending change requests",
                 ctx.number,
             )
 
     return result
 
 
-def should_promote_to_awaiting_review(ctx: PRContext, unresolved_threads: int) -> bool:
+def should_promote_to_awaiting_review(ctx: PRContext, review: ReviewState) -> bool:
     has_awaiting_changes = ctx.has_any_label(LABEL_AWAITING_CHANGES)
     has_blocking_label = ctx.has_any_label(
         LABEL_AWAITING_UPSTREAM,
@@ -115,7 +118,8 @@ def should_promote_to_awaiting_review(ctx: PRContext, unresolved_threads: int) -
         has_awaiting_changes
         and not has_blocking_label
         and build_succeeded
-        and unresolved_threads == 0
+        and review.unresolved_threads == 0
+        and not review.changes_pending
     )
 
     if not result:
@@ -136,12 +140,17 @@ def should_promote_to_awaiting_review(ctx: PRContext, unresolved_threads: int) -
                 "latest build hasn't succeeded",
                 ctx.number,
             )
-        if unresolved_threads > 0:
+        if review.unresolved_threads > 0:
             logger.info(
                 "Not promoting PR #%s to awaiting-review: "
                 "%s unresolved review thread(s)",
                 ctx.number,
-                unresolved_threads,
+                review.unresolved_threads,
+            )
+        if review.changes_pending:
+            logger.info(
+                "Not promoting PR #%s to awaiting-review: change request still pending",
+                ctx.number,
             )
 
     return result
@@ -202,17 +211,30 @@ class PRValidator:
 
     def process_unblocked_pr(self, ctx: PRContext, domain: str | None) -> bool:
         ok = self.post_domain_comment_if_needed(ctx, domain)
-        ok = self.client.remove_labels(ctx.number, LABEL_PR_CHECK_BLOCKED) and ok
+        if self.client.remove_labels(ctx.number, LABEL_PR_CHECK_BLOCKED):
+            ctx.record_label_removed(LABEL_PR_CHECK_BLOCKED)
+        else:
+            ok = False
 
         if should_mark_awaiting_review(ctx):
             logger.info("Marking PR #%s as awaiting-review", ctx.number)
-            ok = self.client.add_labels(ctx.number, LABEL_AWAITING_REVIEW) and ok
+            if self.client.add_labels(ctx.number, LABEL_AWAITING_REVIEW):
+                ctx.record_label_added(LABEL_AWAITING_REVIEW)
+            else:
+                ok = False
 
         return self.start_build_if_needed(ctx) and ok
 
     def process_blocked_pr(self, ctx: PRContext, reasons: list[str]) -> bool:
-        ok = self.client.add_labels(ctx.number, LABEL_PR_CHECK_BLOCKED)
-        ok = self.client.remove_labels(ctx.number, LABEL_AWAITING_REVIEW) and ok
+        ok = True
+        if self.client.add_labels(ctx.number, LABEL_PR_CHECK_BLOCKED):
+            ctx.record_label_added(LABEL_PR_CHECK_BLOCKED)
+        else:
+            ok = False
+        if self.client.remove_labels(ctx.number, LABEL_AWAITING_REVIEW):
+            ctx.record_label_removed(LABEL_AWAITING_REVIEW)
+        else:
+            ok = False
 
         if not ctx.comment_exists(REVIEW_COMMENT_PARTIAL):
             logger.info("Posting review comment on PR #%s", ctx.number)
@@ -220,11 +242,11 @@ class PRValidator:
 
         return ok
 
-    def update_review_state(self, ctx: PRContext, unresolved_threads: int) -> bool:
-        if should_demote_to_awaiting_changes(ctx, unresolved_threads):
+    def update_review_state(self, ctx: PRContext, review: ReviewState) -> bool:
+        if should_demote_to_awaiting_changes(ctx, review):
             ok = self.client.add_labels(ctx.number, LABEL_AWAITING_CHANGES)
             return self.client.remove_labels(ctx.number, LABEL_AWAITING_REVIEW) and ok
-        if should_promote_to_awaiting_review(ctx, unresolved_threads):
+        if should_promote_to_awaiting_review(ctx, review):
             ok = self.client.add_labels(ctx.number, LABEL_AWAITING_REVIEW)
             return self.client.remove_labels(ctx.number, LABEL_AWAITING_CHANGES) and ok
         return True
@@ -297,14 +319,12 @@ class PRValidator:
             )
             ok = self.process_blocked_pr(ctx, validation.reasons) and ok
 
-        unresolved_threads = self.client.count_unresolved_review_threads(pr_num)
-        if unresolved_threads is None:
-            logger.info(
-                "Failed to fetch unresolved review threads on PR #%s", ctx.number
-            )
+        review = self.client.fetch_review_state(pr_num)
+        if review is None:
+            logger.info("Failed to fetch review state on PR #%s", ctx.number)
             return False
 
-        return self.update_review_state(ctx, unresolved_threads) and ok
+        return self.update_review_state(ctx, review) and ok
 
     def run(self) -> bool:
         pr_numbers = self.fetch_filtered_prs(is_draft=False)
